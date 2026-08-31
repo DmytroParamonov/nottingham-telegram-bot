@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS games (
     status TEXT NOT NULL DEFAULT 'lobby',
     round_no INTEGER NOT NULL DEFAULT 0,
     sheriff_seat INTEGER NOT NULL DEFAULT 0,
+    market_start_seat INTEGER,
     phase TEXT NOT NULL DEFAULT 'lobby',
     deck_json TEXT NOT NULL DEFAULT '[]',
     discard_json TEXT NOT NULL DEFAULT '[]',
@@ -75,8 +76,16 @@ class Database:
             yield db
 
     async def init(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         async with self.connection() as db:
             await db.executescript(SCHEMA)
+
+            # Невелика міграція для баз, створених ранніми версіями бота.
+            cur = await db.execute("PRAGMA table_info(games)")
+            columns = {row[1] for row in await cur.fetchall()}
+            if "market_start_seat" not in columns:
+                await db.execute("ALTER TABLE games ADD COLUMN market_start_seat INTEGER")
+
             await db.commit()
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
