@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -16,6 +18,16 @@ router = Router(name="game")
 
 def svc(event) -> GameService:
     return get_service()
+
+
+def legal_goods_text(cards: list[str]) -> str:
+    counter = Counter(cards)
+    if not counter:
+        return "немає"
+    return ", ".join(
+        f"{GOODS[key].emoji} {GOODS[key].name} ×{count}"
+        for key, count in counter.items()
+    )
 
 
 async def ensure_registered(message: Message) -> None:
@@ -132,12 +144,14 @@ async def begin(message: Message) -> None:
             if p["user_id"] == sheriff["user_id"]:
                 text = (
                     "👮 <b>Ти перший шериф.</b>\n\n"
-                    "На кроці «Торгівля» ти не змінюєш руку — спостерігай, що скидають торговці."
+                    "На кроці «Торгівля» ти не змінюєш руку. "
+                    "Відкрий /market і <b>обери першого торговця</b>; далі хід піде за годинниковою стрілкою."
                 )
             else:
                 text = (
                     "🎲 <b>Партія почалася!</b>\n"
-                    "У тебе 6 карток. Спершу етап «Торгівля»: відкрий /market і можеш скинути до 5 карток."
+                    "У тебе 6 карток. Зараз крок «Торгівля»: дочекайся, поки шериф визначить першого гравця. "
+                    "Коли настане твій хід, бот напише тобі."
                 )
             await message.bot.send_message(p["user_id"], text, reply_markup=private_menu())
 
@@ -147,7 +161,8 @@ async def begin(message: Message) -> None:
             "🚪 <b>Ворота Ноттінгема відчинено!</b>\n"
             f"Раунд 1. Шериф: <b>{sheriff['full_name']}</b>.\n"
             f"Гравців: <b>{player_count}</b> · кожен побуде шерифом <b>{rounds_per_sheriff}</b> раз(и).\n\n"
-            "🛒 <b>Крок 1 — Торгівля.</b> Торговці можуть скинути до 5 карток і добрати нові в особистому чаті через /market."
+            "🛒 <b>Крок 1 — Торгівля.</b> Шериф спочатку обирає першого торговця через /market. "
+            "Потім торговці ходять за годинниковою стрілкою, відкрито скидаючи 0–5 карток."
         )
     except GameError as exc:
         await message.answer(f"⚠️ {exc}")
@@ -251,12 +266,13 @@ async def announce_advance(bot, service: GameService, game_id: int, advanced: di
         game["chat_id"],
         f"🔄 <b>Раунд {game['round_no']}</b>\n"
         f"Новий шериф: <b>{sheriff['full_name']}</b>.\n\n"
-        "🛒 Починається крок «Торгівля». Торговці відкривають /market у приватному чаті.",
+        "🛒 Починається крок «Торгівля». Новий шериф має відкрити /market і обрати першого торговця.",
     )
     try:
         await bot.send_message(
             sheriff["user_id"],
-            "👮 <b>Тепер ти шериф.</b> Під час «Торгівлі» руку не змінюєш — уважно дивись, що скидають інші.",
+            "👮 <b>Тепер ти шериф.</b> Відкрий /market і обери першого торговця. "
+            "Сам ти під час «Торгівлі» руку не змінюєш.",
             reply_markup=private_menu(),
         )
     except Exception:
@@ -287,9 +303,9 @@ async def resolve_pass(
     )
     await callback.bot.send_message(
         game["chat_id"],
-        f"✅ Шериф пропустив <b>{merchant['full_name']}</b> без огляду. "
-        f"Дозволених товарів викладено: <b>{len(result['legal_cards'])}</b>; "
-        f"контрабанди на прилавок долілиць: <b>{result['contraband_count']}</b>.",
+        f"✅ Шериф пропустив <b>{merchant['full_name']}</b> без огляду.\n"
+        f"Дозволені товари: <b>{legal_goods_text(result['legal_cards'])}</b>.\n"
+        f"Контрабанда: <b>{result['contraband_count']}</b> карт. Вид залишається таємним.",
     )
     await callback.answer()
     await announce_advance(callback.bot, service, game["id"], result["advanced"])
