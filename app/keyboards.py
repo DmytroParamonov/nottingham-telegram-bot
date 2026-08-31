@@ -17,6 +17,18 @@ def private_menu() -> InlineKeyboardMarkup:
     ])
 
 
+def market_first_keyboard(merchants: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"▶️ {merchant['full_name']}",
+                callback_data=f"market:first:{merchant['user_id']}",
+            )
+        ]
+        for merchant in merchants
+    ])
+
+
 def market_keyboard(hand: list[str], selected: list[str]) -> InlineKeyboardMarkup:
     hand_counter = Counter(hand)
     selected_counter = Counter(selected)
