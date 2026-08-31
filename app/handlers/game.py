@@ -33,7 +33,7 @@ def group_only(message: Message) -> bool:
 @router.message(Command("newgame"))
 async def new_game(message: Message) -> None:
     if not group_only(message):
-        await message.answer("Создавай игру в групповом чате.")
+        await message.answer("Створюй партію в груповому чаті.")
         return
     await ensure_registered(message)
     service = svc(message)
@@ -79,7 +79,7 @@ async def cancel(message: Message) -> None:
         return
     try:
         await svc(message).cancel_game(message.chat.id, message.from_user.id)
-        await message.answer("🧹 Партия отменена. Можно создавать новую через /newgame.")
+        await message.answer("🧹 Партію скасовано. Нову можна створити через /newgame.")
     except GameError as exc:
         await message.answer(f"⚠️ {exc}")
 
@@ -91,7 +91,7 @@ async def players_cmd(message: Message) -> None:
     service = svc(message)
     game = await service.active_game(message.chat.id)
     if not game:
-        await message.answer("Активной партии нет.")
+        await message.answer("Активної партії немає.")
         return
     players = await service.players(game["id"])
     await message.answer(render_lobby(players, game["owner_id"]))
@@ -105,7 +105,7 @@ async def begin(message: Message) -> None:
     try:
         lobby = await service.active_game(message.chat.id)
         if not lobby or lobby["status"] != "lobby":
-            raise GameError("Открытого лобби нет.")
+            raise GameError("Відкритого лобі немає.")
         lobby_players = await service.players(lobby["id"])
 
         dm_failed = []
@@ -113,15 +113,15 @@ async def begin(message: Message) -> None:
             try:
                 await message.bot.send_message(
                     p["user_id"],
-                    "🎟 <b>Связь с рынком проверена.</b> Игра сейчас стартует.",
+                    "🎟 <b>Зв’язок перевірено.</b> Партія зараз почнеться.",
                 )
             except Exception:
                 dm_failed.append(p["full_name"])
         if dm_failed:
             await message.answer(
-                "⛔ <b>Пока не начинаю партию.</b> Не могу написать в личку: "
+                "⛔ <b>Партію поки не запускаю.</b> Не можу написати в особисті повідомлення: "
                 + ", ".join(dm_failed)
-                + ".\nИм нужно открыть бота и нажать /start, затем повторить /begin."
+                + ".\nЇм потрібно відкрити бота, натиснути /start і потім повторити /begin."
             )
             return
 
@@ -131,20 +131,23 @@ async def begin(message: Message) -> None:
         for p in players:
             if p["user_id"] == sheriff["user_id"]:
                 text = (
-                    "👮 <b>Ты первый шериф.</b>\n\n"
-                    "Пока торговцы собирают мешки, можешь готовить свою самую неподкупную физиономию 😄"
+                    "👮 <b>Ти перший шериф.</b>\n\n"
+                    "На кроці «Торгівля» ти не змінюєш руку — спостерігай, що скидають торговці."
                 )
             else:
                 text = (
-                    "🎲 <b>Партия началась!</b>\n"
-                    "Твоя рука уже выдана. Открой /hand и собери мешок через /bag."
+                    "🎲 <b>Партія почалася!</b>\n"
+                    "У тебе 6 карток. Спершу етап «Торгівля»: відкрий /market і можеш скинути до 5 карток."
                 )
             await message.bot.send_message(p["user_id"], text, reply_markup=private_menu())
 
+        player_count = len(players)
+        rounds_per_sheriff = 3 if player_count == 3 else 2
         await message.answer(
-            f"🚪 <b>Ворота Ноттингема открыты!</b>\n"
-            f"Раунд 1. Шериф: <b>{sheriff['full_name']}</b>.\n\n"
-            "Все остальные собирают мешки в личке с ботом."
+            "🚪 <b>Ворота Ноттінгема відчинено!</b>\n"
+            f"Раунд 1. Шериф: <b>{sheriff['full_name']}</b>.\n"
+            f"Гравців: <b>{player_count}</b> · кожен побуде шерифом <b>{rounds_per_sheriff}</b> раз(и).\n\n"
+            "🛒 <b>Крок 1 — Торгівля.</b> Торговці можуть скинути до 5 карток і добрати нові в особистому чаті через /market."
         )
     except GameError as exc:
         await message.answer(f"⚠️ {exc}")
@@ -157,7 +160,7 @@ async def status(message: Message) -> None:
         if group_only(message):
             game = await service.active_game(message.chat.id)
             if not game:
-                raise GameError("Активной партии нет.")
+                raise GameError("Активної партії немає.")
         else:
             game = await service.game_for_user(message.from_user.id)
         payload = await service.status_payload(game["id"])
@@ -172,15 +175,21 @@ async def render_sheriff_panel(event: Message | CallbackQuery) -> None:
         game = await service.game_for_user(event.from_user.id)
         sheriff = await service.sheriff(game["id"])
         if sheriff["user_id"] != event.from_user.id:
-            raise GameError("Сейчас ты не шериф.")
+            raise GameError("Зараз ти не шериф.")
         if game["phase"] != "inspection":
-            raise GameError("Ещё не все торговцы подали декларации.")
+            raise GameError("Огляд ще не почався — спершу всі мають подати декларації.")
         merchants = await service.merchant_rows(game["id"])
         bribes = {}
         for m in merchants:
             offer = await service.bribe(game["id"], m["user_id"])
-            bribes[m["user_id"]] = int(offer["coins"]) if offer and offer["status"] == "offered" else 0
-        text = "👮 <b>Пост шерифа</b>\nВыбери торговца:"
+            bribes[m["user_id"]] = (
+                int(offer["coins"]) if offer and offer["status"] == "offered" else 0
+            )
+        text = (
+            "👮 <b>Пост шерифа</b>\n"
+            "Ти можеш оглянути будь-яку кількість мішків у будь-якому порядку або не оглядати жодного.\n\n"
+            "Обери торговця:"
+        )
         kb = sheriff_keyboard(merchants, bribes)
     except GameError as exc:
         text, kb = f"⚠️ {exc}", private_menu()
@@ -209,20 +218,20 @@ async def sheriff_merchant(callback: CallbackQuery) -> None:
         game = await service.game_for_user(callback.from_user.id)
         sheriff = await service.sheriff(game["id"])
         if sheriff["user_id"] != callback.from_user.id:
-            raise GameError("Сейчас ты не шериф.")
+            raise GameError("Зараз ти не шериф.")
         merchant = await service.player(game["id"], merchant_id)
         if merchant["resolved"]:
-            raise GameError("Этот торговец уже прошёл ворота.")
+            raise GameError("Цей торговець уже пройшов ворота.")
         bag_size = len(loads(merchant["bag_json"]))
         good = GOODS[merchant["declared_good"]]
         offer = await service.bribe(game["id"], merchant_id)
         bribe = int(offer["coins"]) if offer and offer["status"] == "offered" else 0
         await callback.message.answer(
             f"🧳 <b>{merchant['full_name']}</b>\n"
-            f"Заявлено: <b>{bag_size} × {good.emoji} {good.name}</b>\n"
-            f"Предложенная взятка: <b>💰 {bribe}</b>\n\n"
-            "Что делаем?",
-            reply_markup=sheriff_decision_keyboard(merchant_id),
+            f"Задекларовано: <b>{bag_size} × {good.emoji} {good.name}</b>\n"
+            f"Запропонований грошовий хабар: <b>💰 {bribe}</b>\n\n"
+            "Що робимо?",
+            reply_markup=sheriff_decision_keyboard(merchant_id, bribe),
         )
         await callback.answer()
     except GameError as exc:
@@ -237,41 +246,69 @@ async def announce_advance(bot, service: GameService, game_id: int, advanced: di
         rows = await service.scoreboard(game_id)
         await bot.send_message(game["chat_id"], render_scoreboard(rows))
         return
-    new_game = await service.game(game_id)
     sheriff = await service.sheriff(game_id)
     await bot.send_message(
-        new_game["chat_id"],
-        f"🔄 <b>Раунд {new_game['round_no']}</b>\nНовый шериф: <b>{sheriff['full_name']}</b>.\n"
-        "Остальные снова собирают мешки в личке.",
+        game["chat_id"],
+        f"🔄 <b>Раунд {game['round_no']}</b>\n"
+        f"Новий шериф: <b>{sheriff['full_name']}</b>.\n\n"
+        "🛒 Починається крок «Торгівля». Торговці відкривають /market у приватному чаті.",
     )
     try:
         await bot.send_message(
             sheriff["user_id"],
-            "👮 <b>Теперь ты шериф.</b> Когда все подадут декларации, откроется /inspect.",
+            "👮 <b>Тепер ти шериф.</b> Під час «Торгівлі» руку не змінюєш — уважно дивись, що скидають інші.",
             reply_markup=private_menu(),
         )
     except Exception:
         pass
 
 
+async def resolve_pass(
+    callback: CallbackQuery,
+    merchant_id: int,
+    *,
+    accept_bribe: bool,
+) -> None:
+    service = svc(callback)
+    game = await service.game_for_user(callback.from_user.id)
+    merchant = await service.player(game["id"], merchant_id)
+    result = await service.pass_merchant(
+        callback.from_user.id,
+        merchant_id,
+        accept_bribe=accept_bribe,
+    )
+    suffix = (
+        f"\nПрийнятий хабар: <b>💰 {result['bribe']}</b>."
+        if result["bribe"]
+        else "\nШериф не взяв грошового хабара."
+    )
+    await callback.message.edit_text(
+        f"✅ <b>{merchant['full_name']} проходить без огляду.</b>{suffix}"
+    )
+    await callback.bot.send_message(
+        game["chat_id"],
+        f"✅ Шериф пропустив <b>{merchant['full_name']}</b> без огляду. "
+        f"Дозволених товарів викладено: <b>{len(result['legal_cards'])}</b>; "
+        f"контрабанди на прилавок долілиць: <b>{result['contraband_count']}</b>.",
+    )
+    await callback.answer()
+    await announce_advance(callback.bot, service, game["id"], result["advanced"])
+
+
 @router.callback_query(F.data.startswith("sheriff:pass:"))
 async def sheriff_pass(callback: CallbackQuery) -> None:
-    service = svc(callback)
     merchant_id = int(callback.data.rsplit(":", 1)[1])
     try:
-        game = await service.game_for_user(callback.from_user.id)
-        merchant = await service.player(game["id"], merchant_id)
-        result = await service.pass_merchant(callback.from_user.id, merchant_id)
-        await callback.message.edit_text(
-            f"✅ <b>{merchant['full_name']} пропущен без проверки.</b>\n"
-            f"Взятка шерифу: <b>💰 {result['bribe']}</b>."
-        )
-        await callback.bot.send_message(
-            game["chat_id"],
-            f"✅ Шериф пропустил <b>{merchant['full_name']}</b> без досмотра."
-        )
-        await callback.answer()
-        await announce_advance(callback.bot, service, game["id"], result["advanced"])
+        await resolve_pass(callback, merchant_id, accept_bribe=False)
+    except GameError as exc:
+        await callback.answer(str(exc), show_alert=True)
+
+
+@router.callback_query(F.data.startswith("sheriff:accept:"))
+async def sheriff_accept_bribe(callback: CallbackQuery) -> None:
+    merchant_id = int(callback.data.rsplit(":", 1)[1])
+    try:
+        await resolve_pass(callback, merchant_id, accept_bribe=True)
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
 
@@ -287,19 +324,31 @@ async def sheriff_inspect(callback: CallbackQuery) -> None:
         result = outcome["result"]
         bag = outcome["bag"]
         contents = ", ".join(GOODS[key].label for key in bag)
+        settlement = outcome["settlement"]
+        goods_payment = ""
+        if settlement.goods_paid:
+            goods_payment = (
+                "\nОплата товарами через нестачу золота: "
+                + ", ".join(GOODS[key].label for key in settlement.goods_paid)
+            )
+        if settlement.forgiven:
+            goods_payment += f"\nНесплачений залишок {settlement.forgiven} вважається погашеним."
+
         if result.truthful:
             verdict = (
-                f"😇 <b>ТОРГОВЕЦ БЫЛ ЧЕСТЕН!</b>\n"
-                f"Шериф выплачивает <b>💰 {outcome['merchant_delta']}</b>."
+                "😇 <b>ТОРГОВЕЦЬ СКАЗАВ ПРАВДУ!</b>\n"
+                f"Шериф має сплатити штраф на суму <b>💰 {outcome['amount_due']}</b>."
+                f"{goods_payment}"
             )
         else:
             confiscated = ", ".join(GOODS[key].label for key in result.confiscated)
             verdict = (
-                f"🚨 <b>ПОЙМАН!</b>\n"
-                f"Конфисковано: {confiscated}\n"
-                f"Штраф: <b>💰 {abs(outcome['merchant_delta'])}</b>."
+                "🚨 <b>БРЕХНЮ ВИКРИТО!</b>\n"
+                f"Конфісковано: {confiscated}\n"
+                f"Торговець має сплатити штраф на суму <b>💰 {outcome['amount_due']}</b>."
+                f"{goods_payment}"
             )
-        text = f"🔍 <b>Мешок {merchant['full_name']}</b>\n{contents}\n\n{verdict}"
+        text = f"🔍 <b>Мішок {merchant['full_name']}</b>\n{contents}\n\n{verdict}"
         await callback.message.edit_text(text)
         await callback.bot.send_message(game["chat_id"], text)
         await callback.answer()
