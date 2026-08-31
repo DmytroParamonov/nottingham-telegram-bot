@@ -12,10 +12,11 @@ from .game_data import (
     LEGAL_GOODS,
     MAX_PLAYERS,
     MIN_PLAYERS,
-    SHERIFF_TURNS_PER_PLAYER,
     STARTING_COINS,
+    deck_counts_for_players,
+    sheriff_turns_for_players,
 )
-from .rules import final_scores, inspect_bag
+from .rules import final_scores, inspect_bag, settle_debt
 
 
 class GameError(RuntimeError):
@@ -45,7 +46,7 @@ class GameService:
     async def create_game(self, chat_id: int, owner_id: int) -> dict:
         current = await self.active_game(chat_id)
         if current:
-            raise GameError("В этом чате уже есть активная партия.")
+            raise GameError("У цьому чаті вже є активна партія.")
         game_id = await self.db.execute(
             "INSERT INTO games(chat_id, owner_id) VALUES(?, ?)",
             (chat_id, owner_id),
@@ -56,7 +57,7 @@ class GameService:
     async def game(self, game_id: int) -> dict:
         game = await self.db.fetchone("SELECT * FROM games WHERE id=?", (game_id,))
         if not game:
-            raise GameError("Партия не найдена.")
+            raise GameError("Партію не знайдено.")
         return game
 
     async def players(self, game_id: int) -> list[dict]:
@@ -79,15 +80,15 @@ class GameService:
             (game_id, user_id),
         )
         if not row:
-            raise GameError("Ты не участвуешь в этой партии.")
+            raise GameError("Ти не береш участі в цій партії.")
         return row
 
     async def _add_player(self, game_id: int, user_id: int) -> None:
         rows = await self.players(game_id)
         if any(p["user_id"] == user_id for p in rows):
-            raise GameError("Ты уже в этой партии.")
+            raise GameError("Ти вже в цій партії.")
         if len(rows) >= MAX_PLAYERS:
-            raise GameError(f"Максимум игроков: {MAX_PLAYERS}.")
+            raise GameError(f"Максимум гравців: {MAX_PLAYERS}.")
         await self.db.execute(
             "INSERT INTO game_players(game_id,user_id,seat,coins) VALUES(?,?,?,?)",
             (game_id, user_id, len(rows), STARTING_COINS),
@@ -96,16 +97,16 @@ class GameService:
     async def join_game(self, chat_id: int, user_id: int) -> dict:
         game = await self.active_game(chat_id)
         if not game or game["status"] != "lobby":
-            raise GameError("Сейчас нет открытого лобби.")
+            raise GameError("Зараз немає відкритого лобі.")
         await self._add_player(game["id"], user_id)
         return game
 
     async def leave_lobby(self, chat_id: int, user_id: int) -> None:
         game = await self.active_game(chat_id)
         if not game or game["status"] != "lobby":
-            raise GameError("Выйти можно только из лобби.")
+            raise GameError("Вийти можна лише з лобі.")
         if game["owner_id"] == user_id:
-            raise GameError("Создатель не может выйти. Используй /cancelgame.")
+            raise GameError("Творець партії не може вийти. Використай /cancelgame.")
         await self.db.execute(
             "DELETE FROM game_players WHERE game_id=? AND user_id=?",
             (game["id"], user_id),
@@ -120,32 +121,32 @@ class GameService:
     async def cancel_game(self, chat_id: int, user_id: int) -> None:
         game = await self.active_game(chat_id)
         if not game:
-            raise GameError("Активной партии нет.")
+            raise GameError("Активної партії немає.")
         if game["owner_id"] != user_id:
-            raise GameError("Отменить партию может только создатель.")
+            raise GameError("Скасувати партію може лише її творець.")
         await self.db.execute(
             "UPDATE games SET status='cancelled', phase='cancelled', finished_at=CURRENT_TIMESTAMP WHERE id=?",
             (game["id"],),
         )
 
-    def _new_deck(self) -> list[str]:
+    def _new_deck(self, player_count: int) -> list[str]:
         deck: list[str] = []
-        for key, good in GOODS.items():
-            deck.extend([key] * good.count)
+        for key, count in deck_counts_for_players(player_count).items():
+            deck.extend([key] * count)
         random.shuffle(deck)
         return deck
 
     async def start_game(self, chat_id: int, user_id: int) -> dict:
         game = await self.active_game(chat_id)
         if not game or game["status"] != "lobby":
-            raise GameError("Открытого лобби нет.")
+            raise GameError("Відкритого лобі немає.")
         if game["owner_id"] != user_id:
-            raise GameError("Начать игру может только создатель.")
+            raise GameError("Почати гру може лише творець партії.")
         players = await self.players(game["id"])
         if len(players) < MIN_PLAYERS:
-            raise GameError(f"Нужно минимум {MIN_PLAYERS} игрока.")
+            raise GameError(f"Потрібно щонайменше {MIN_PLAYERS} гравці.")
 
-        deck = self._new_deck()
+        deck = self._new_deck(len(players))
         for p in players:
             hand = [deck.pop() for _ in range(HAND_SIZE)]
             await self.db.execute(
@@ -158,13 +159,14 @@ class GameService:
                 (dumps(hand), STARTING_COINS, game["id"], p["user_id"]),
             )
 
+        first_sheriff = random.randrange(len(players))
         await self.db.execute(
             """
-            UPDATE games SET status='playing', round_no=1, sheriff_seat=0,
-                phase='packing', deck_json=?, discard_json='[]'
+            UPDATE games SET status='playing', round_no=1, sheriff_seat=?,
+                phase='market', deck_json=?, discard_json='[]'
             WHERE id=?
             """,
-            (dumps(deck), game["id"]),
+            (first_sheriff, dumps(deck), game["id"]),
         )
         return await self.game(game["id"])
 
@@ -179,7 +181,7 @@ class GameService:
             (user_id,),
         )
         if not row:
-            raise GameError("У тебя сейчас нет активной партии.")
+            raise GameError("Зараз у тебе немає активної партії.")
         return row
 
     async def sheriff(self, game_id: int) -> dict:
@@ -193,28 +195,146 @@ class GameService:
             (game_id, game["sheriff_seat"]),
         )
         if not row:
-            raise GameError("Шериф не найден.")
+            raise GameError("Шерифа не знайдено.")
         return row
 
     async def merchant_rows(self, game_id: int) -> list[dict]:
         sheriff = await self.sheriff(game_id)
         return [p for p in await self.players(game_id) if p["user_id"] != sheriff["user_id"]]
 
+    async def declaration_order(self, game_id: int) -> list[dict]:
+        game = await self.game(game_id)
+        players = await self.players(game_id)
+        sheriff_seat = int(game["sheriff_seat"])
+        by_seat = {int(p["seat"]): p for p in players}
+        order: list[dict] = []
+        for step in range(1, len(players)):
+            seat = (sheriff_seat + step) % len(players)
+            order.append(by_seat[seat])
+        return order
+
+    async def current_declarer(self, game_id: int) -> dict | None:
+        for merchant in await self.declaration_order(game_id):
+            if merchant["declared_good"] is None:
+                return merchant
+        return None
+
+    async def toggle_market_good(self, user_id: int, good_key: str) -> dict:
+        game = await self.game_for_user(user_id)
+        if game["phase"] != "market":
+            raise GameError("Етап «Торгівля» вже завершено.")
+        sheriff = await self.sheriff(game["id"])
+        if sheriff["user_id"] == user_id:
+            raise GameError("Шериф під час «Торгівлі» карти не міняє.")
+        p = await self.player(game["id"], user_id)
+        if p["resolved"]:
+            raise GameError("Ти вже завершив торгівлю.")
+        if good_key not in GOODS:
+            raise GameError("Невідомий товар.")
+
+        hand = loads(p["hand_json"])
+        selected = loads(p["bag_json"])
+        hand_count = hand.count(good_key)
+        selected_count = selected.count(good_key)
+        if selected_count < hand_count and len(selected) < 5:
+            selected.append(good_key)
+        elif selected_count:
+            selected.remove(good_key)
+        else:
+            raise GameError("Цей товар не можна вибрати для скидання.")
+
+        await self.db.execute(
+            "UPDATE game_players SET bag_json=? WHERE game_id=? AND user_id=?",
+            (dumps(selected), game["id"], user_id),
+        )
+        return await self.player(game["id"], user_id)
+
+    async def clear_market_selection(self, user_id: int) -> dict:
+        game = await self.game_for_user(user_id)
+        if game["phase"] != "market":
+            raise GameError("Зараз не етап «Торгівля».")
+        p = await self.player(game["id"], user_id)
+        if p["resolved"]:
+            raise GameError("Торгівлю вже завершено.")
+        await self.db.execute(
+            "UPDATE game_players SET bag_json='[]' WHERE game_id=? AND user_id=?",
+            (game["id"], user_id),
+        )
+        return await self.player(game["id"], user_id)
+
+    async def confirm_market(self, user_id: int) -> tuple[dict, bool]:
+        game = await self.game_for_user(user_id)
+        if game["phase"] != "market":
+            raise GameError("Зараз не етап «Торгівля».")
+        sheriff = await self.sheriff(game["id"])
+        if sheriff["user_id"] == user_id:
+            raise GameError("Шериф під час «Торгівлі» карти не міняє.")
+        p = await self.player(game["id"], user_id)
+        if p["resolved"]:
+            raise GameError("Ти вже завершив торгівлю.")
+
+        hand = loads(p["hand_json"])
+        selected = loads(p["bag_json"])
+        if len(selected) > 5:
+            raise GameError("Під час «Торгівлі» можна скинути максимум 5 карток.")
+        for card in selected:
+            hand.remove(card)
+
+        deck = loads(game["deck_json"])
+        discard = loads(game["discard_json"])
+        for _ in range(len(selected)):
+            if not deck:
+                if not discard:
+                    raise GameError("У колоді тимчасово не залишилося карток.")
+                random.shuffle(discard)
+                deck = discard
+                discard = []
+            hand.append(deck.pop())
+
+        await self.db.execute(
+            "UPDATE game_players SET hand_json=?, resolved=1 WHERE game_id=? AND user_id=?",
+            (dumps(hand), game["id"], user_id),
+        )
+        await self.db.execute(
+            "UPDATE games SET deck_json=?, discard_json=? WHERE id=?",
+            (dumps(deck), dumps(discard), game["id"]),
+        )
+
+        merchants = await self.merchant_rows(game["id"])
+        all_ready = all((m["user_id"] == user_id) or bool(m["resolved"]) for m in merchants)
+        if all_ready:
+            # In 2nd edition the cards set aside during Market become the face-up
+            # discard pile only after all Merchants have drawn replacements.
+            discard = loads((await self.game(game["id"]))["discard_json"])
+            refreshed = await self.merchant_rows(game["id"])
+            for merchant in refreshed:
+                discard.extend(loads(merchant["bag_json"]))
+            await self.db.execute(
+                "UPDATE games SET phase='packing', discard_json=? WHERE id=?",
+                (dumps(discard), game["id"]),
+            )
+            await self.db.execute(
+                "UPDATE game_players SET bag_json='[]', resolved=0 WHERE game_id=?",
+                (game["id"],),
+            )
+
+        return await self.player(game["id"], user_id), all_ready
+
     async def toggle_bag_good(self, user_id: int, good_key: str) -> dict:
         game = await self.game_for_user(user_id)
         if game["phase"] != "packing":
-            raise GameError("Сейчас мешки уже не собирают.")
+            raise GameError("Зараз не етап «Завантаження товарів».")
         sheriff = await self.sheriff(game["id"])
         if sheriff["user_id"] == user_id:
-            raise GameError("Ты шериф этого раунда и мешок не собираешь.")
+            raise GameError("Ти шериф цього раунду й мішок не збираєш.")
 
         p = await self.player(game["id"], user_id)
         if p["bag_locked"]:
-            raise GameError("Мешок уже запечатан.")
+            raise GameError("Мішок уже запечатано.")
         hand = loads(p["hand_json"])
         bag = loads(p["bag_json"])
         if good_key not in GOODS:
-            raise GameError("Неизвестный товар.")
+            raise GameError("Невідомий товар.")
 
         hand_count = hand.count(good_key)
         bag_count = bag.count(good_key)
@@ -223,7 +343,7 @@ class GameService:
         elif bag_count:
             bag.remove(good_key)
         else:
-            raise GameError("Этот товар нельзя добавить.")
+            raise GameError("Цей товар не можна додати.")
 
         await self.db.execute(
             "UPDATE game_players SET bag_json=? WHERE game_id=? AND user_id=?",
@@ -233,75 +353,111 @@ class GameService:
 
     async def clear_bag(self, user_id: int) -> dict:
         game = await self.game_for_user(user_id)
+        if game["phase"] != "packing":
+            raise GameError("Зараз мішок змінювати не можна.")
         p = await self.player(game["id"], user_id)
         if p["bag_locked"]:
-            raise GameError("Мешок уже запечатан.")
+            raise GameError("Мішок уже запечатано.")
         await self.db.execute(
             "UPDATE game_players SET bag_json='[]' WHERE game_id=? AND user_id=?",
             (game["id"], user_id),
         )
         return await self.player(game["id"], user_id)
 
-    async def lock_bag(self, user_id: int) -> dict:
-        game = await self.game_for_user(user_id)
-        p = await self.player(game["id"], user_id)
-        bag = loads(p["bag_json"])
-        if not BAG_MIN <= len(bag) <= BAG_MAX:
-            raise GameError(f"В мешке должно быть от {BAG_MIN} до {BAG_MAX} товаров.")
-        return p
-
-    async def declare(self, user_id: int, legal_good: str) -> tuple[dict, bool]:
-        if legal_good not in LEGAL_GOODS:
-            raise GameError("Объявить можно только легальный товар.")
+    async def lock_bag(self, user_id: int) -> tuple[dict, bool, dict | None]:
         game = await self.game_for_user(user_id)
         if game["phase"] != "packing":
-            raise GameError("Декларации уже закрыты.")
+            raise GameError("Зараз мішок запечатувати не можна.")
         sheriff = await self.sheriff(game["id"])
         if sheriff["user_id"] == user_id:
-            raise GameError("Шериф не подаёт декларацию.")
+            raise GameError("Шериф цього раунду не готує мішок.")
         p = await self.player(game["id"], user_id)
         if p["bag_locked"]:
-            raise GameError("Ты уже подал декларацию.")
+            raise GameError("Мішок уже запечатано.")
         bag = loads(p["bag_json"])
         if not BAG_MIN <= len(bag) <= BAG_MAX:
-            raise GameError(f"В мешке должно быть от {BAG_MIN} до {BAG_MAX} товаров.")
+            raise GameError(f"У мішку має бути від {BAG_MIN} до {BAG_MAX} товарів.")
 
         hand = loads(p["hand_json"])
         for card in bag:
             hand.remove(card)
         await self.db.execute(
             """
-            UPDATE game_players SET hand_json=?, declared_good=?, bag_locked=1
+            UPDATE game_players SET hand_json=?, bag_locked=1
             WHERE game_id=? AND user_id=?
             """,
-            (dumps(hand), legal_good, game["id"], user_id),
+            (dumps(hand), game["id"], user_id),
         )
+
         merchants = await self.merchant_rows(game["id"])
-        all_ready = all(
-            (m["user_id"] == user_id) or bool(m["bag_locked"])
+        refreshed = {m["user_id"]: m for m in await self.merchant_rows(game["id"])}
+        all_locked = all(
+            (m["user_id"] == user_id) or bool(refreshed[m["user_id"]]["bag_locked"])
             for m in merchants
         )
-        if all_ready:
+        first_declarer = None
+        if all_locked:
+            await self.db.execute(
+                "UPDATE games SET phase='declaration' WHERE id=?",
+                (game["id"],),
+            )
+            first_declarer = await self.current_declarer(game["id"])
+
+        return await self.player(game["id"], user_id), all_locked, first_declarer
+
+    async def declare(self, user_id: int, legal_good: str) -> tuple[dict, bool, dict | None]:
+        if legal_good not in LEGAL_GOODS:
+            raise GameError("Декларувати можна лише дозволений товар.")
+        game = await self.game_for_user(user_id)
+        if game["phase"] != "declaration":
+            raise GameError("Зараз не етап «Декларування».")
+        sheriff = await self.sheriff(game["id"])
+        if sheriff["user_id"] == user_id:
+            raise GameError("Шериф не декларує товари.")
+        p = await self.player(game["id"], user_id)
+        if not p["bag_locked"]:
+            raise GameError("Спочатку запечатай мішок.")
+        if p["declared_good"] is not None:
+            raise GameError("Твою декларацію вже зафіксовано й змінити її не можна.")
+
+        current = await self.current_declarer(game["id"])
+        if not current or current["user_id"] != user_id:
+            if current:
+                raise GameError(f"Зараз декларує {current['full_name']}. Дочекайся своєї черги.")
+            raise GameError("Декларування вже завершено.")
+
+        await self.db.execute(
+            """
+            UPDATE game_players SET declared_good=?
+            WHERE game_id=? AND user_id=?
+            """,
+            (legal_good, game["id"], user_id),
+        )
+
+        next_declarer = await self.current_declarer(game["id"])
+        all_declared = next_declarer is None
+        if all_declared:
             await self.db.execute(
                 "UPDATE games SET phase='inspection' WHERE id=?",
                 (game["id"],),
             )
-        return await self.player(game["id"], user_id), all_ready
+
+        return await self.player(game["id"], user_id), all_declared, next_declarer
 
     async def set_bribe(self, user_id: int, coins: int) -> dict:
         game = await self.game_for_user(user_id)
-        if game["phase"] not in {"packing", "inspection"}:
-            raise GameError("Сейчас взятку предложить нельзя.")
+        if game["phase"] != "inspection":
+            raise GameError("Хабар можна пропонувати під час етапу «Огляд».")
         sheriff = await self.sheriff(game["id"])
         if sheriff["user_id"] == user_id:
-            raise GameError("Шериф сам себе взятку не даёт 😄")
+            raise GameError("Шериф сам собі хабар не дає 😄")
         p = await self.player(game["id"], user_id)
         if not p["bag_locked"]:
-            raise GameError("Сначала запечатай мешок и подай декларацию.")
+            raise GameError("Спочатку запечатай мішок і подай декларацію.")
         if coins < 0:
-            raise GameError("Взятка не может быть отрицательной.")
+            raise GameError("Хабар не може бути від’ємним.")
         if coins > p["coins"]:
-            raise GameError("Столько золота у тебя нет.")
+            raise GameError("У тебе немає стільки золота.")
         await self.db.execute(
             """
             INSERT INTO bribes(game_id,merchant_id,sheriff_id,coins,status)
@@ -344,76 +500,117 @@ class GameService:
             (dumps(deck), dumps(discard), game_id),
         )
 
-    async def pass_merchant(self, sheriff_id: int, merchant_id: int) -> dict:
+    async def pass_merchant(
+        self,
+        sheriff_id: int,
+        merchant_id: int,
+        *,
+        accept_bribe: bool = False,
+    ) -> dict:
         game = await self.game_for_user(sheriff_id)
         sheriff = await self.sheriff(game["id"])
         if sheriff["user_id"] != sheriff_id:
-            raise GameError("Решения принимает только текущий шериф.")
+            raise GameError("Рішення ухвалює лише поточний шериф.")
         if game["phase"] != "inspection":
-            raise GameError("Проверка ещё не началась.")
+            raise GameError("Огляд ще не почався.")
         merchant = await self.player(game["id"], merchant_id)
         if merchant["resolved"]:
-            raise GameError("Этот торговец уже прошёл ворота.")
-        if not merchant["bag_locked"]:
-            raise GameError("Торговец ещё не подал декларацию.")
+            raise GameError("Цей торговець уже пройшов ворота.")
+        if merchant["declared_good"] is None:
+            raise GameError("Торговець ще не подав декларацію.")
 
         bag = loads(merchant["bag_json"])
-        market = loads(merchant["market_json"])
-        market.extend(bag)
+        merchant_market = loads(merchant["market_json"])
+        merchant_market.extend(bag)
+        merchant_coins = int(merchant["coins"])
+        sheriff_coins = int(sheriff["coins"])
+
         bribe = await self.bribe(game["id"], merchant_id)
         paid = 0
-        if bribe and bribe["status"] == "offered":
-            paid = min(int(bribe["coins"]), int(merchant["coins"]))
+        if accept_bribe:
+            if not bribe or bribe["status"] != "offered" or int(bribe["coins"]) <= 0:
+                raise GameError("Активного грошового хабара від цього торговця немає.")
+            paid = int(bribe["coins"])
+            if paid > merchant_coins:
+                raise GameError("Торговець уже не має достатньо золота для цього хабара.")
+            merchant_coins -= paid
+            sheriff_coins += paid
+            await self.db.execute(
+                "UPDATE bribes SET status='paid' WHERE game_id=? AND merchant_id=?",
+                (game["id"], merchant_id),
+            )
+        elif bribe and bribe["status"] == "offered":
+            await self.db.execute(
+                "UPDATE bribes SET status='ignored' WHERE game_id=? AND merchant_id=?",
+                (game["id"], merchant_id),
+            )
 
         await self.db.execute(
             """
-            UPDATE game_players SET market_json=?, coins=coins-?, resolved=1
+            UPDATE game_players SET market_json=?, coins=?, resolved=1
             WHERE game_id=? AND user_id=?
             """,
-            (dumps(market), paid, game["id"], merchant_id),
+            (dumps(merchant_market), merchant_coins, game["id"], merchant_id),
         )
         await self.db.execute(
-            "UPDATE game_players SET coins=coins+? WHERE game_id=? AND user_id=?",
-            (paid, game["id"], sheriff_id),
+            "UPDATE game_players SET coins=? WHERE game_id=? AND user_id=?",
+            (sheriff_coins, game["id"], sheriff_id),
         )
-        if bribe:
-            await self.db.execute(
-                "UPDATE bribes SET status='paid', coins=? WHERE game_id=? AND merchant_id=?",
-                (paid, game["id"], merchant_id),
-            )
 
-        await self._draw_to_hand(game["id"], merchant_id)
         advanced = await self._advance_if_ready(game["id"])
-        return {"bag": bag, "bribe": paid, "advanced": advanced}
+        legal_cards = [card for card in bag if GOODS[card].legal]
+        contraband_count = sum(1 for card in bag if not GOODS[card].legal)
+        return {
+            "bag": bag,
+            "legal_cards": legal_cards,
+            "contraband_count": contraband_count,
+            "bribe": paid,
+            "advanced": advanced,
+        }
 
     async def inspect_merchant(self, sheriff_id: int, merchant_id: int) -> dict:
         game = await self.game_for_user(sheriff_id)
         sheriff = await self.sheriff(game["id"])
         if sheriff["user_id"] != sheriff_id:
-            raise GameError("Решения принимает только текущий шериф.")
+            raise GameError("Рішення ухвалює лише поточний шериф.")
         if game["phase"] != "inspection":
-            raise GameError("Проверка ещё не началась.")
+            raise GameError("Огляд ще не почався.")
         merchant = await self.player(game["id"], merchant_id)
         if merchant["resolved"]:
-            raise GameError("Этот торговец уже проверен.")
+            raise GameError("Цього торговця вже оглянули.")
 
         bag = loads(merchant["bag_json"])
         result = inspect_bag(bag, merchant["declared_good"])
-        market = loads(merchant["market_json"])
-        market.extend(result.admitted)
+        merchant_market = loads(merchant["market_json"])
+        merchant_market.extend(result.admitted)
+        sheriff_market = loads(sheriff["market_json"])
 
         merchant_coins = int(merchant["coins"])
         sheriff_coins = int(sheriff["coins"])
-        merchant_delta = 0
-        sheriff_delta = 0
         if result.truthful:
-            payment = min(result.sheriff_pays, sheriff_coins)
-            merchant_delta += payment
-            sheriff_delta -= payment
+            settlement = settle_debt(
+                sheriff_coins,
+                sheriff_market,
+                merchant_market,
+                result.sheriff_pays,
+            )
+            sheriff_coins = settlement.payer_coins
+            sheriff_market = list(settlement.payer_market)
+            merchant_coins += settlement.cash_paid
+            merchant_market = list(settlement.receiver_market)
+            amount_due = result.sheriff_pays
         else:
-            payment = min(result.merchant_pays, merchant_coins)
-            merchant_delta -= payment
-            sheriff_delta += payment
+            settlement = settle_debt(
+                merchant_coins,
+                merchant_market,
+                sheriff_market,
+                result.merchant_pays,
+            )
+            merchant_coins = settlement.payer_coins
+            merchant_market = list(settlement.payer_market)
+            sheriff_coins += settlement.cash_paid
+            sheriff_market = list(settlement.receiver_market)
+            amount_due = result.merchant_pays
 
         current_game = await self.game(game["id"])
         discard = loads(current_game["discard_json"])
@@ -421,14 +618,14 @@ class GameService:
 
         await self.db.execute(
             """
-            UPDATE game_players SET market_json=?, coins=coins+?, resolved=1
+            UPDATE game_players SET market_json=?, coins=?, resolved=1
             WHERE game_id=? AND user_id=?
             """,
-            (dumps(market), merchant_delta, game["id"], merchant_id),
+            (dumps(merchant_market), merchant_coins, game["id"], merchant_id),
         )
         await self.db.execute(
-            "UPDATE game_players SET coins=coins+? WHERE game_id=? AND user_id=?",
-            (sheriff_delta, game["id"], sheriff_id),
+            "UPDATE game_players SET market_json=?, coins=? WHERE game_id=? AND user_id=?",
+            (dumps(sheriff_market), sheriff_coins, game["id"], sheriff_id),
         )
         await self.db.execute(
             "UPDATE games SET discard_json=? WHERE id=?",
@@ -439,13 +636,12 @@ class GameService:
             (game["id"], merchant_id),
         )
 
-        await self._draw_to_hand(game["id"], merchant_id)
         advanced = await self._advance_if_ready(game["id"])
         return {
             "result": result,
             "bag": bag,
-            "merchant_delta": merchant_delta,
-            "sheriff_delta": sheriff_delta,
+            "settlement": settlement,
+            "amount_due": amount_due,
             "advanced": advanced,
         }
 
@@ -456,13 +652,16 @@ class GameService:
             return None
 
         players = await self.players(game_id)
-        max_rounds = len(players) * SHERIFF_TURNS_PER_PLAYER
+        max_rounds = len(players) * sheriff_turns_for_players(len(players))
         if int(game["round_no"]) >= max_rounds:
             await self.db.execute(
                 "UPDATE games SET status='finished', phase='finished', finished_at=CURRENT_TIMESTAMP WHERE id=?",
                 (game_id,),
             )
             return {"finished": True}
+
+        for p in players:
+            await self._draw_to_hand(game_id, p["user_id"])
 
         next_seat = (int(game["sheriff_seat"]) + 1) % len(players)
         next_round = int(game["round_no"]) + 1
@@ -476,7 +675,7 @@ class GameService:
             (game_id,),
         )
         await self.db.execute(
-            "UPDATE games SET round_no=?, sheriff_seat=?, phase='packing' WHERE id=?",
+            "UPDATE games SET round_no=?, sheriff_seat=?, phase='market' WHERE id=?",
             (next_round, next_seat, game_id),
         )
         return {"finished": False, "round_no": next_round, "sheriff_seat": next_seat}
@@ -496,7 +695,14 @@ class GameService:
             row = dict(p)
             row["score"] = scores[p["user_id"]]
             rows.append(row)
-        rows.sort(key=lambda r: (r["score"]["total"], r["score"]["coins"]), reverse=True)
+        rows.sort(
+            key=lambda r: (
+                r["score"]["total"],
+                r["score"]["legal_count"],
+                r["score"]["contraband_count"],
+            ),
+            reverse=True,
+        )
         return rows
 
     async def status_payload(self, game_id: int) -> dict:
@@ -509,5 +715,5 @@ class GameService:
     def bag_summary(bag: list[str]) -> str:
         counter = Counter(bag)
         if not counter:
-            return "пусто"
+            return "порожньо"
         return ", ".join(f"{GOODS[key].emoji}×{count}" for key, count in counter.items())
