@@ -108,17 +108,21 @@ async def _binding_deal_with_bluffed_goods_and_followup_inspection():
         assert outcome["paid_bag"] == ["pepper"]
         assert outcome["missing_bag"] == {}
         assert outcome["followup"] is not None
+        assert outcome["primary"]["advanced"] is None
+        assert outcome["advanced"] is not None
 
         # First merchant passed; promised Pepper left the bag for Sheriff's stand.
+        # Because the follow-up inspection resolves the final bag, the game then
+        # starts round 2 and resets per-round resolved flags back to zero.
         first_after = await service.player(game["id"], first["user_id"])
-        assert first_after["resolved"] == 1
+        assert first_after["resolved"] == 0
         assert first_after["coins"] == 42
         assert loads(first_after["market_json"]) == ["apple"]
 
         # Follow-up inspection is binding and executed immediately. The second
         # merchant was truthful, so Sheriff pays the Cheese penalty (2 Gold).
         second_after = await service.player(game["id"], second["user_id"])
-        assert second_after["resolved"] == 1
+        assert second_after["resolved"] == 0
         assert second_after["coins"] == 52
 
         sheriff_after = await service.player(game["id"], sheriff["user_id"])
