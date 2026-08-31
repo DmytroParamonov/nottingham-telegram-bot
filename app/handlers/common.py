@@ -12,8 +12,14 @@ from ..keyboards import (
     bag_keyboard,
     bribe_keyboard,
     declaration_keyboard,
+    market_first_keyboard,
     market_keyboard,
     private_menu,
+)
+from ..market_order import (
+    choose_first_trader,
+    current_market_trader,
+    ensure_market_turn,
 )
 from ..runtime import get_service
 from ..service import GameError, GameService
@@ -30,7 +36,10 @@ def goods_list(cards: list[str]) -> str:
     counter = Counter(cards)
     if not counter:
         return "нічого"
-    return ", ".join(f"{GOODS[key].emoji} {GOODS[key].name} ×{count}" for key, count in counter.items())
+    return ", ".join(
+        f"{GOODS[key].emoji} {GOODS[key].name} ×{count}"
+        for key, count in counter.items()
+    )
 
 
 @router.message(CommandStart())
@@ -81,22 +90,41 @@ async def market(event: Message | CallbackQuery) -> None:
         if game["phase"] != "market":
             raise GameError("Зараз не етап «Торгівля».")
         sheriff = await service.sheriff(game["id"])
+
         if sheriff["user_id"] == event.from_user.id:
-            raise GameError("Ти шериф цього раунду: під час «Торгівлі» лише спостерігаєш 👮")
-        p = await service.player(game["id"], event.from_user.id)
-        if p["resolved"]:
-            raise GameError("Ти вже завершив торгівлю. Чекаємо на інших торговців.")
-        hand_cards = loads(p["hand_json"])
-        selected = loads(p["bag_json"])
-        text = (
-            "🛒 <b>Торгівля</b>\n"
-            f"Обрано для скидання: <b>{len(selected)}/5</b>\n\n"
-            "Можна скинути від 0 до 5 карток і добрати до шести. "
-            "Скинуті товари будуть відкрито показані всім гравцям."
-        )
-        kb = market_keyboard(hand_cards, selected)
+            if game.get("market_start_seat") is None:
+                merchants = await service.merchant_rows(game["id"])
+                text = (
+                    "👮 <b>Торгівля: вибір першого гравця</b>\n\n"
+                    "За правилами шериф обирає, хто торгує першим. "
+                    "Після нього хід піде за годинниковою стрілкою."
+                )
+                kb = market_first_keyboard(merchants)
+            else:
+                current = await current_market_trader(service, game["id"])
+                if current:
+                    text = (
+                        "👮 <b>Торгівля триває.</b>\n"
+                        f"Зараз торгує: <b>{current['full_name']}</b>.\n"
+                        "Спостерігай, які картки він відкрито скидає."
+                    )
+                else:
+                    text = "👮 Торгівлю цього раунду вже завершено."
+                kb = private_menu()
+        else:
+            p = await ensure_market_turn(service, event.from_user.id)
+            hand_cards = loads(p["hand_json"])
+            selected = loads(p["bag_json"])
+            text = (
+                "🛒 <b>Торгівля — твій хід</b>\n"
+                f"Обрано для скидання: <b>{len(selected)}/5</b>\n\n"
+                "Можна скинути від 0 до 5 карток і добрати до шести. "
+                "Скинуті товари будуть відкрито показані всім гравцям."
+            )
+            kb = market_keyboard(hand_cards, selected)
     except GameError as exc:
         text, kb = f"⚠️ {exc}", private_menu()
+
     if isinstance(event, CallbackQuery):
         await event.answer()
         await event.message.answer(text, reply_markup=kb)
@@ -104,16 +132,46 @@ async def market(event: Message | CallbackQuery) -> None:
         await event.answer(text, reply_markup=kb)
 
 
+@router.callback_query(F.data.startswith("market:first:"))
+async def market_first(callback: CallbackQuery) -> None:
+    service = svc(callback)
+    merchant_id = int(callback.data.rsplit(":", 1)[1])
+    try:
+        merchant = await choose_first_trader(service, callback.from_user.id, merchant_id)
+        game = await service.game_for_user(callback.from_user.id)
+        await callback.message.edit_text(
+            f"✅ Першим торгує <b>{merchant['full_name']}</b>. "
+            "Далі — за годинниковою стрілкою."
+        )
+        await callback.bot.send_message(
+            game["chat_id"],
+            f"🛒 Шериф обрав першого торговця: <b>{merchant['full_name']}</b>. "
+            "Після нього торгуємо за годинниковою стрілкою.",
+        )
+        try:
+            await callback.bot.send_message(
+                merchant["user_id"],
+                "🛒 <b>Твій хід у Торгівлі.</b> Відкрий /market, скинь 0–5 карток і підтвердь хід.",
+                reply_markup=private_menu(),
+            )
+        except Exception:
+            pass
+        await callback.answer()
+    except GameError as exc:
+        await callback.answer(str(exc), show_alert=True)
+
+
 @router.callback_query(F.data.startswith("market:toggle:"))
 async def market_toggle(callback: CallbackQuery) -> None:
     service = svc(callback)
     key = callback.data.rsplit(":", 1)[-1]
     try:
+        await ensure_market_turn(service, callback.from_user.id)
         p = await service.toggle_market_good(callback.from_user.id, key)
         hand_cards = loads(p["hand_json"])
         selected = loads(p["bag_json"])
         await callback.message.edit_text(
-            "🛒 <b>Торгівля</b>\n"
+            "🛒 <b>Торгівля — твій хід</b>\n"
             f"Обрано для скидання: <b>{len(selected)}/5</b>",
             reply_markup=market_keyboard(hand_cards, selected),
         )
@@ -126,9 +184,10 @@ async def market_toggle(callback: CallbackQuery) -> None:
 async def market_clear(callback: CallbackQuery) -> None:
     service = svc(callback)
     try:
+        await ensure_market_turn(service, callback.from_user.id)
         p = await service.clear_market_selection(callback.from_user.id)
         await callback.message.edit_text(
-            "🛒 <b>Торгівля</b>\nОбрано для скидання: <b>0/5</b>",
+            "🛒 <b>Торгівля — твій хід</b>\nОбрано для скидання: <b>0/5</b>",
             reply_markup=market_keyboard(loads(p["hand_json"]), []),
         )
         await callback.answer()
@@ -141,15 +200,15 @@ async def market_confirm(callback: CallbackQuery) -> None:
     service = svc(callback)
     try:
         game = await service.game_for_user(callback.from_user.id)
+        await ensure_market_turn(service, callback.from_user.id)
         before = await service.player(game["id"], callback.from_user.id)
         discarded = loads(before["bag_json"])
         _, all_ready = await service.confirm_market(callback.from_user.id)
+
         await callback.message.edit_text(
-            f"✅ <b>Торгівлю завершено.</b> Скинуто карток: {len(discarded)}.\n"
-            "Коли всі закінчать, почнеться завантаження товарів.",
+            f"✅ <b>Твій хід Торгівлі завершено.</b> Скинуто карток: {len(discarded)}.",
             reply_markup=private_menu(),
         )
-
         if discarded:
             await callback.bot.send_message(
                 game["chat_id"],
@@ -162,7 +221,6 @@ async def market_confirm(callback: CallbackQuery) -> None:
             )
 
         if all_ready:
-            game = await service.game_for_user(callback.from_user.id)
             await callback.bot.send_message(
                 game["chat_id"],
                 "🎒 <b>Крок 2 — Завантаження товарів.</b>\n"
@@ -170,6 +228,21 @@ async def market_confirm(callback: CallbackQuery) -> None:
                 "Після запечатування змінити вміст уже не можна.\n\n"
                 "Відкрийте /bag у приватному чаті з ботом.",
             )
+        else:
+            next_trader = await current_market_trader(service, game["id"])
+            if next_trader:
+                await callback.bot.send_message(
+                    game["chat_id"],
+                    f"➡️ Наступним торгує <b>{next_trader['full_name']}</b>.",
+                )
+                try:
+                    await callback.bot.send_message(
+                        next_trader["user_id"],
+                        "🛒 <b>Тепер твій хід у Торгівлі.</b> Відкрий /market.",
+                        reply_markup=private_menu(),
+                    )
+                except Exception:
+                    pass
         await callback.answer()
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
@@ -183,7 +256,7 @@ async def bag(event: Message | CallbackQuery) -> None:
         game = await service.game_for_user(event.from_user.id)
         if game["phase"] != "packing":
             if game["phase"] == "market":
-                raise GameError("Спочатку заверши етап «Торгівля» через /market.")
+                raise GameError("Спочатку потрібно завершити етап «Торгівля».")
             if game["phase"] in {"declaration", "inspection"}:
                 raise GameError("Мішки цього раунду вже запечатано.")
             raise GameError("Зараз мішок збирати не можна.")
@@ -262,7 +335,7 @@ async def lock_bag(callback: CallbackQuery) -> None:
             await callback.bot.send_message(
                 game["chat_id"],
                 "📜 <b>Крок 3 — Декларування.</b>\n"
-                f"Починає <b>{first_declarer['full_name']}</b>, далі — за порядком навколо столу.\n"
+                f"Починає <b>{first_declarer['full_name']}</b>, далі — за годинниковою стрілкою.\n"
                 "Кількість карток у мішку називається точно, а вид можна назвати лише один — дозволений товар.",
             )
             try:
