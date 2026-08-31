@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 
 from app.config import load_settings
 from app.db import Database
-from app.handlers import common_router, game_router
+from app.handlers import common_router, deals_router, game_router
 from app.runtime import set_service
 from app.service import GameService
 
@@ -30,6 +30,7 @@ async def main() -> None:
 
     dp = Dispatcher()
     dp.include_router(common_router)
+    dp.include_router(deals_router)
     dp.include_router(game_router)
 
     await bot.set_my_commands([
@@ -40,7 +41,9 @@ async def main() -> None:
         BotCommand(command="market", description="Торгівля: скинути й добрати карти"),
         BotCommand(command="hand", description="Показати мою руку"),
         BotCommand(command="bag", description="Зібрати мішок"),
-        BotCommand(command="bribe", description="Запропонувати хабар"),
+        BotCommand(command="deal", description="Угоди, товари й складні хабарі"),
+        BotCommand(command="promise", description="Додати майбутню обіцянку до угоди"),
+        BotCommand(command="bribe", description="Швидкий грошовий хабар"),
         BotCommand(command="inspect", description="Панель шерифа"),
         BotCommand(command="status", description="Стан партії"),
     ])
