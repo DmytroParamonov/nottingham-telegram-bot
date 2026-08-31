@@ -16,6 +16,16 @@ class InspectionResult:
     confiscated: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class DebtSettlement:
+    cash_paid: int
+    goods_paid: tuple[str, ...]
+    forgiven: int
+    payer_coins: int
+    payer_market: tuple[str, ...]
+    receiver_market: tuple[str, ...]
+
+
 def inspect_bag(bag: Iterable[str], declared_good: str) -> InspectionResult:
     cards = tuple(bag)
     if declared_good not in LEGAL_GOODS:
@@ -51,12 +61,77 @@ def goods_count(cards: Iterable[str]) -> Counter[str]:
     return Counter(cards)
 
 
-def majority_bonuses(markets: dict[int, Iterable[str]]) -> dict[int, int]:
-    """Return king/queen bonuses for legal goods.
+def _best_subset_at_least(cards: list[str], target: int) -> list[str]:
+    """Pick a subset with the smallest value >= target; tie-break on fewer cards."""
+    if target <= 0:
+        return []
+    states: dict[int, list[str]] = {0: []}
+    for card in cards:
+        value = GOODS[card].value
+        for total, chosen in list(states.items())[::-1]:
+            new_total = total + value
+            candidate = chosen + [card]
+            previous = states.get(new_total)
+            if previous is None or len(candidate) < len(previous):
+                states[new_total] = candidate
+    candidates = [(total, chosen) for total, chosen in states.items() if total >= target]
+    if not candidates:
+        return list(cards)
+    _, chosen = min(candidates, key=lambda item: (item[0], len(item[1])))
+    return chosen
 
-    Ties split the combined occupied bonuses for that rank using integer division.
-    This keeps scoring deterministic for a Telegram game without extra tie dialogs.
+
+def settle_debt(
+    payer_coins: int,
+    payer_market: Iterable[str],
+    receiver_market: Iterable[str],
+    amount: int,
+) -> DebtSettlement:
+    """Settle a penalty using Gold, then Legal Goods, then Contraband.
+
+    The physical game lets the payer choose the exact cards. For the bot we choose a
+    minimum-overpayment subset automatically while preserving the official priority:
+    Legal Goods before Contraband. Any debt left after all assets are exhausted is forgiven.
     """
+    amount = max(0, int(amount))
+    payer = list(payer_market)
+    receiver = list(receiver_market)
+    cash_paid = min(max(0, int(payer_coins)), amount)
+    remaining = amount - cash_paid
+    goods_paid: list[str] = []
+
+    if remaining > 0:
+        legal = [card for card in payer if GOODS[card].legal]
+        legal_total = market_value(legal)
+        if legal_total >= remaining:
+            chosen = _best_subset_at_least(legal, remaining)
+            goods_paid.extend(chosen)
+            remaining = max(0, remaining - market_value(chosen))
+        else:
+            goods_paid.extend(legal)
+            remaining -= legal_total
+            contraband = [card for card in payer if not GOODS[card].legal]
+            if contraband:
+                chosen = _best_subset_at_least(contraband, remaining)
+                goods_paid.extend(chosen)
+                remaining = max(0, remaining - market_value(chosen))
+
+    for card in goods_paid:
+        payer.remove(card)
+        receiver.append(card)
+
+    return DebtSettlement(
+        cash_paid=cash_paid,
+        goods_paid=tuple(goods_paid),
+        forgiven=max(0, remaining),
+        payer_coins=max(0, int(payer_coins) - cash_paid),
+        payer_market=tuple(payer),
+        receiver_market=tuple(receiver),
+    )
+
+
+def majority_bonuses(markets: dict[int, Iterable[str]]) -> dict[int, int]:
+    """Return official King/Queen bonuses, including tie splitting (rounded down)."""
     bonuses = {player_id: 0 for player_id in markets}
     counters = {pid: goods_count(cards) for pid, cards in markets.items()}
 
@@ -99,12 +174,17 @@ def final_scores(players: dict[int, dict]) -> dict[int, dict[str, int]]:
     result: dict[int, dict[str, int]] = {}
 
     for pid, data in players.items():
-        value = market_value(data["market"])
+        cards = list(data["market"])
+        value = market_value(cards)
+        legal_count = sum(1 for card in cards if GOODS[card].legal)
+        contraband_count = len(cards) - legal_count
         total = int(data["coins"]) + value + bonuses[pid]
         result[pid] = {
             "coins": int(data["coins"]),
             "goods": value,
             "bonus": bonuses[pid],
+            "legal_count": legal_count,
+            "contraband_count": contraband_count,
             "total": total,
         }
     return result
