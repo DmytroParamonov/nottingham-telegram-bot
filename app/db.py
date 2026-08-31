@@ -61,6 +61,31 @@ CREATE TABLE IF NOT EXISTS bribes (
     status TEXT NOT NULL DEFAULT 'offered',
     PRIMARY KEY (game_id, merchant_id)
 );
+
+CREATE TABLE IF NOT EXISTS deals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    round_no INTEGER NOT NULL,
+    proposer_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    sheriff_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    target_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    action TEXT NOT NULL DEFAULT 'pass' CHECK(action IN ('pass','inspect')),
+    gold INTEGER NOT NULL DEFAULT 0,
+    stand_goods_json TEXT NOT NULL DEFAULT '{}',
+    bag_goods_json TEXT NOT NULL DEFAULT '{}',
+    followup_inspect_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+    future_promise TEXT,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK(status IN ('draft','offered','rejected','fulfilled','expired')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ix_deals_game_round_status
+ON deals(game_id, round_no, status);
+
+CREATE INDEX IF NOT EXISTS ix_deals_sheriff_status
+ON deals(sheriff_id, status);
 """
 
 
