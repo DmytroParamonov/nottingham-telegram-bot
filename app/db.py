@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS bribes (
     status TEXT NOT NULL DEFAULT 'offered',
     PRIMARY KEY (game_id, merchant_id)
 );
+
+-- На початку кожного нового раунду шериф змінюється, тому він має
+-- заново обрати першого гравця для кроку «Торгівля».
+CREATE TRIGGER IF NOT EXISTS trg_reset_market_start_on_sheriff_change
+AFTER UPDATE OF sheriff_seat ON games
+WHEN OLD.sheriff_seat <> NEW.sheriff_seat
+BEGIN
+    UPDATE games SET market_start_seat=NULL WHERE id=NEW.id;
+END;
 """
 
 
@@ -86,6 +95,17 @@ class Database:
             if "market_start_seat" not in columns:
                 await db.execute("ALTER TABLE games ADD COLUMN market_start_seat INTEGER")
 
+            # Якщо колонку додали щойно, тригер із SCHEMA міг не створитися до ALTER.
+            await db.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_reset_market_start_on_sheriff_change
+                AFTER UPDATE OF sheriff_seat ON games
+                WHEN OLD.sheriff_seat <> NEW.sheriff_seat
+                BEGIN
+                    UPDATE games SET market_start_seat=NULL WHERE id=NEW.id;
+                END
+                """
+            )
             await db.commit()
 
     async def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
