@@ -9,6 +9,7 @@ from ..keyboards import declaration_keyboard
 from ..market_order import current_market_trader
 from ..runtime import get_service
 from ..service import GameError, GameService
+from ..tutorials import beginner_rules_text, phase_help_text
 from ..ui import (
     render_game_table,
     render_group_home,
@@ -111,7 +112,7 @@ async def _edit_or_send_table(callback: CallbackQuery) -> None:
 
 async def _create_lobby(message: Message) -> None:
     if not _is_group(message):
-        await message.answer("Створювати партію потрібно в групі.")
+        await message.answer("Збирати купців потрібно в групі.")
         return
     await _register(message)
     service = svc(message)
@@ -150,22 +151,22 @@ async def _begin_game(message: Message) -> None:
     try:
         lobby = await service.active_game(message.chat.id)
         if not lobby or lobby["status"] != "lobby":
-            raise GameError("Відкритого лобі немає.")
+            raise GameError("Відкритого збору купців немає.")
         if lobby["owner_id"] != message.from_user.id:
-            raise GameError("Почати гру може лише творець партії.")
+            raise GameError("Вирушити до брами може лише творець партії.")
         players = await service.players(lobby["id"])
         failed: list[str] = []
         for player in players:
             try:
                 await message.bot.send_message(
                     player["user_id"],
-                    "🎟 <b>Перевірка зв'язку успішна.</b>",
+                    "🎟 <b>Зв'язок із брамою встановлено.</b>",
                 )
             except Exception:
                 failed.append(player["full_name"])
         if failed:
             await message.answer(
-                "⛔ Не можу запустити партію: ці гравці ще не відкрили бота в ЛС:\n"
+                "⛔ Не можу почати шлях: ці купці ще не відкрили бота в ЛС:\n"
                 + "\n".join(f"• {name}" for name in failed)
                 + "\n\nНехай натиснуть /start у приватному чаті з ботом."
             )
@@ -180,9 +181,9 @@ async def _begin_game(message: Message) -> None:
 
         table_text, table_keyboard = await _render_group_table(service, message.chat.id)
         await message.answer(
-            "🚪 <b>ВОРОТА НОТТІНГЕМА ВІДЧИНЕНО!</b>\n"
-            f"Перший шериф: <b>{sheriff['full_name']}</b>\n\n"
-            "Відтепер основні дії доступні кнопками — відкривайте «МОЯ ПАНЕЛЬ».",
+            "🚪 <b>БРАМА НОВІГРАДА ВІДЧИНЕНА!</b>\n"
+            f"Перший командир варти: <b>{sheriff['full_name']}</b>\n\n"
+            "Основні дії доступні кнопками. Якщо загубився — відкрий «МОЯ ПАНЕЛЬ» і натисни «Що робити зараз?»."
         )
         await message.answer(table_text, reply_markup=table_keyboard)
     except GameError as exc:
@@ -202,10 +203,10 @@ async def ux_start(message: Message) -> None:
         await message.answer(text, reply_markup=keyboard)
     except GameError:
         await message.answer(
-            "🏰 <b>ШЕРИФ НОТТІНГЕМА</b>\n"
+            "🐺 <b>БРАМА НОВІГРАДА</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "Приватний канал готовий. Коли приєднаєшся до партії в групі, "
-            "тут з'являться твоя рука, мішок, декларації та угоди.",
+            "Приватний канал купця готовий. Коли приєднаєшся до партії в групі, "
+            "тут з'являться твої товари, вантаж, декларації та таємні угоди з вартою.",
             reply_markup=private_start_keyboard(),
         )
 
@@ -228,7 +229,7 @@ async def ux_begin(message: Message) -> None:
 @router.callback_query(F.data == "ui:create")
 async def ui_create(callback: CallbackQuery) -> None:
     if not _is_group(callback):
-        await callback.answer("Створи гру в групі.", show_alert=True)
+        await callback.answer("Збери купців у групі.", show_alert=True)
         return
     await _register(callback)
     service = svc(callback)
@@ -239,7 +240,7 @@ async def ui_create(callback: CallbackQuery) -> None:
             render_lobby_table(players, game["owner_id"]),
             reply_markup=lobby_keyboard(),
         )
-        await callback.answer("Лобі створено")
+        await callback.answer("Купців зібрано біля брами")
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
 
@@ -250,7 +251,7 @@ async def ui_join(callback: CallbackQuery) -> None:
     try:
         await svc(callback).join_game(callback.message.chat.id, callback.from_user.id)
         await _edit_or_send_table(callback)
-        await callback.answer("Ти в грі ✅")
+        await callback.answer("Ти серед купців ✅")
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
 
@@ -260,7 +261,7 @@ async def ui_leave(callback: CallbackQuery) -> None:
     try:
         await svc(callback).leave_lobby(callback.message.chat.id, callback.from_user.id)
         await _edit_or_send_table(callback)
-        await callback.answer("Ти вийшов з лобі")
+        await callback.answer("Ти залишив браму")
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
 
@@ -272,14 +273,14 @@ async def ui_begin(callback: CallbackQuery) -> None:
     try:
         lobby = await service.active_game(callback.message.chat.id)
         if not lobby or lobby["status"] != "lobby":
-            raise GameError("Відкритого лобі немає.")
+            raise GameError("Відкритого збору купців немає.")
         if lobby["owner_id"] != callback.from_user.id:
-            raise GameError("Почати гру може лише творець партії.")
+            raise GameError("Вирушити до брами може лише творець партії.")
         players = await service.players(lobby["id"])
         failed: list[str] = []
         for player in players:
             try:
-                await callback.bot.send_message(player["user_id"], "🎟 <b>Зв'язок із Ноттінгемом є.</b>")
+                await callback.bot.send_message(player["user_id"], "🎟 <b>Зв'язок із брамою є.</b>")
             except Exception:
                 failed.append(player["full_name"])
         if failed:
@@ -292,7 +293,7 @@ async def ui_begin(callback: CallbackQuery) -> None:
             text, keyboard = await _private_payload(service, player["user_id"])
             await callback.bot.send_message(player["user_id"], text, reply_markup=keyboard)
         await _edit_or_send_table(callback)
-        await callback.answer("Партія почалася! 🏰")
+        await callback.answer("Брама відчинена! 🐺")
     except GameError as exc:
         await callback.answer(str(exc), show_alert=True)
 
@@ -303,7 +304,7 @@ async def ui_table(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     await _edit_or_send_table(callback)
-    await callback.answer("Стіл оновлено")
+    await callback.answer("Браму оновлено")
 
 
 @router.callback_query(F.data == "ui:me")
@@ -353,17 +354,17 @@ async def ui_declare(callback: CallbackQuery) -> None:
         service = svc(callback)
         game = await service.game_for_user(callback.from_user.id)
         if game["phase"] != "declaration":
-            raise GameError("Зараз не етап декларування.")
+            raise GameError("Зараз не час декларації біля брами.")
         current = await service.current_declarer(game["id"])
         if not current or current["user_id"] != callback.from_user.id:
-            raise GameError("Зараз не твоя черга декларувати.")
+            raise GameError("Зараз не твоя черга говорити з вартою.")
         player = await service.player(game["id"], callback.from_user.id)
         bag_size = len(loads(player["bag_json"]))
         await callback.message.answer(
-            "📜 <b>ДЕКЛАРАЦІЯ</b>\n"
+            "📜 <b>ДЕКЛАРАЦІЯ БІЛЯ БРАМИ</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"У мішку: <b>{bag_size}</b> карт. Кількість бот уже знає.\n"
-            "Обери <b>один дозволений товар</b>, який заявляєш шерифу:",
+            f"У вантажі: <b>{bag_size}</b> карт. Кількість варта вже знає.\n"
+            "Обери <b>один дозволений товар</b>, який заявляєш. Про справжній вміст можеш брехати 😏",
             reply_markup=declaration_keyboard(),
         )
         await callback.answer()
@@ -373,15 +374,35 @@ async def ui_declare(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "ui:rules")
 async def ui_rules(callback: CallbackQuery) -> None:
-    text = (
-        "📜 <b>ШВИДКІ ПРАВИЛА</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🛒 <b>Торгівля:</b> скинь 0–5 карт і добери до 6.\n"
-        "🎒 <b>Мішок:</b> поклади 1–5 товарів та запечатай.\n"
-        "📜 <b>Декларація:</b> назви точну кількість і лише один дозволений вид товару.\n"
-        "🔍 <b>Огляд:</b> шериф пропускає або відкриває мішок.\n"
-        "🤝 <b>Угоди:</b> золото, товари, блеф і домовленості дозволені.\n\n"
-        "🏆 Перемагає найбагатший торговець після фінального підрахунку."
-    )
     await callback.answer()
-    await callback.message.answer(text)
+    await callback.message.answer(beginner_rules_text())
+
+
+@router.callback_query(F.data == "ui:help")
+async def ui_help(callback: CallbackQuery) -> None:
+    await _register(callback)
+    service = svc(callback)
+    try:
+        game = await service.game_for_user(callback.from_user.id)
+        player = await service.player(game["id"], callback.from_user.id)
+        sheriff = await service.sheriff(game["id"])
+        current_trader = None
+        current_declarer = None
+        if game["phase"] == "market" and game.get("market_start_seat") is not None:
+            current_trader = await current_market_trader(service, game["id"])
+        if game["phase"] == "declaration":
+            current_declarer = await service.current_declarer(game["id"])
+
+        text = phase_help_text(
+            phase=game["phase"],
+            is_sheriff=sheriff["user_id"] == callback.from_user.id,
+            is_current_trader=bool(current_trader and current_trader["user_id"] == callback.from_user.id),
+            market_order_missing=game["phase"] == "market" and game.get("market_start_seat") is None,
+            is_current_declarer=bool(current_declarer and current_declarer["user_id"] == callback.from_user.id),
+            resolved=bool(player["resolved"]),
+        )
+        await callback.answer("Підказка готова")
+        await callback.message.answer(text)
+    except GameError:
+        await callback.answer()
+        await callback.message.answer(beginner_rules_text())

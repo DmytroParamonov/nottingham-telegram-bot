@@ -38,18 +38,18 @@ async def main() -> None:
     dp.include_router(game_router)
 
     await bot.set_my_commands([
-        BotCommand(command="start", description="Відкрити ігрову панель"),
-        BotCommand(command="newgame", description="Створити лобі"),
-        BotCommand(command="join", description="Приєднатися до лобі"),
-        BotCommand(command="begin", description="Почати партію"),
-        BotCommand(command="market", description="Торгівля"),
-        BotCommand(command="hand", description="Показати руку"),
-        BotCommand(command="bag", description="Зібрати мішок"),
-        BotCommand(command="deal", description="Угоди та хабарі"),
+        BotCommand(command="start", description="Відкрити панель купця"),
+        BotCommand(command="newgame", description="Зібрати купців біля брами"),
+        BotCommand(command="join", description="Приєднатися до купців"),
+        BotCommand(command="begin", description="Вирушити до брами"),
+        BotCommand(command="market", description="Торг на ринку"),
+        BotCommand(command="hand", description="Показати мої товари"),
+        BotCommand(command="bag", description="Зібрати вантаж повозки"),
+        BotCommand(command="deal", description="Угоди з міською вартою"),
         BotCommand(command="promise", description="Майбутня обіцянка"),
-        BotCommand(command="bribe", description="Швидкий грошовий хабар"),
-        BotCommand(command="inspect", description="Панель шерифа"),
-        BotCommand(command="status", description="Стан партії"),
+        BotCommand(command="bribe", description="Швидкий хабар у кронах"),
+        BotCommand(command="inspect", description="Панель міської варти"),
+        BotCommand(command="status", description="Стан біля брами"),
     ])
 
     try:

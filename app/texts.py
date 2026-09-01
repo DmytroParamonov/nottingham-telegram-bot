@@ -7,12 +7,12 @@ from .game_data import GOODS
 
 
 PHASE_NAMES = {
-    "lobby": "Лобі",
-    "market": "Торгівля",
-    "packing": "Завантаження товарів",
-    "declaration": "Декларування",
-    "inspection": "Огляд",
-    "finished": "Завершено",
+    "lobby": "Збір біля брами",
+    "market": "Торг на ринку",
+    "packing": "Завантаження воза",
+    "declaration": "Декларація біля брами",
+    "inspection": "Огляд вартою",
+    "finished": "Браму зачинено",
     "cancelled": "Скасовано",
 }
 
@@ -23,19 +23,19 @@ def player_name(row: dict) -> str:
 
 def render_hand(hand: list[str]) -> str:
     counter = Counter(hand)
-    lines = ["📦 <b>Твоя рука</b>"]
+    lines = ["📦 <b>Твоя рука товарів</b>"]
     for key, count in counter.items():
         good = GOODS[key]
-        kind = "дозволений товар" if good.legal else "КОНТРАБАНДА"
+        kind = "дозволений товар" if good.legal else "ЗАБОРОНЕНИЙ ТОВАР"
         lines.append(
             f"{good.emoji} {good.name} ×{count} · {kind} · "
-            f"ціна {good.value} · штраф {good.penalty}"
+            f"вартість {good.value} крон · штраф {good.penalty} крон"
         )
     return "\n".join(lines)
 
 
 def render_lobby(players: list[dict], owner_id: int) -> str:
-    lines = ["🏰 <b>Шериф Ноттінгема — лобі</b>", ""]
+    lines = ["🏰 <b>Брама Новіграда — збір купців</b>", ""]
     for i, p in enumerate(players, 1):
         crown = " 👑" if p["user_id"] == owner_id else ""
         lines.append(f"{i}. {p['full_name']}{crown}")
@@ -54,32 +54,32 @@ def public_stall_summary(cards: list[str]) -> str:
 
 def render_status(game: dict, players: list[dict], sheriff: dict | None) -> str:
     lines = [
-        "🏰 <b>Стан партії</b>",
+        "🏰 <b>Стан біля брами</b>",
         f"Раунд: <b>{game['round_no']}</b>",
         f"Етап: <b>{PHASE_NAMES.get(game['phase'], game['phase'])}</b>",
     ]
     if sheriff:
-        lines.append(f"👮 Шериф: <b>{sheriff['full_name']}</b>")
+        lines.append(f"🛡 Командир варти: <b>{sheriff['full_name']}</b>")
     lines.append("")
     for p in players:
         market = loads(p["market_json"])
         ready = "✅" if (p["bag_locked"] or p["resolved"]) else "⏳"
         lines.append(
-            f"{ready} <b>{p['full_name']}</b> · 💰 {p['coins']}\n"
-            f"   Прилавок: {public_stall_summary(market)}"
+            f"{ready} <b>{p['full_name']}</b> · 🪙 {p['coins']} крон\n"
+            f"   Лавка: {public_stall_summary(market)}"
         )
     return "\n".join(lines)
 
 
 def render_scoreboard(rows: list[dict]) -> str:
-    lines = ["🏆 <b>ПІДСУМКИ НОТТІНГЕМА</b>", ""]
+    lines = ["🏆 <b>ПІДСУМКИ БРАМИ НОВІГРАДА</b>", ""]
     medals = ["🥇", "🥈", "🥉"]
     for idx, row in enumerate(rows):
         s = row["score"]
         medal = medals[idx] if idx < len(medals) else f"{idx + 1}."
         lines.append(
             f"{medal} <b>{row['full_name']}</b> — <b>{s['total']}</b> очок\n"
-            f"   💰 {s['coins']} + товари {s['goods']} + бонуси {s['bonus']}\n"
+            f"   🪙 {s['coins']} крон + товари {s['goods']} + бонуси {s['bonus']}\n"
             f"   Дозволених: {s['legal_count']} · контрабанди: {s['contraband_count']}"
         )
     return "\n".join(lines)

@@ -20,17 +20,17 @@ class Good:
         return f"{self.emoji} {self.name}"
 
 
-# Базові товари Sheriff of Nottingham: 2nd Edition.
-# Назви відповідають українській локалізації Games7Days.
+# Dark-fantasy reskin inspired by grim medieval trade stories.
+# Internal keys intentionally stay unchanged so existing SQLite games remain compatible.
 GOODS: dict[str, Good] = {
-    "apple": Good("apple", "Яблука", "🍎", True, 2, 2, 48, 20, 10),
-    "cheese": Good("cheese", "Сир", "🧀", True, 3, 2, 36, 15, 10),
-    "bread": Good("bread", "Хліб", "🍞", True, 3, 2, 36, 15, 10),
-    "chicken": Good("chicken", "Курка", "🍗", True, 4, 2, 24, 10, 5),
-    "pepper": Good("pepper", "Перець", "🌶️", False, 6, 4, 22),
-    "mead": Good("mead", "Медовуха", "🍺", False, 7, 4, 21),
-    "silk": Good("silk", "Шовк", "🧵", False, 8, 4, 12),
-    "crossbow": Good("crossbow", "Арбалет", "🏹", False, 9, 4, 5),
+    "apple": Good("apple", "Провіант", "🍞", True, 2, 2, 48, 20, 10),
+    "cheese": Good("cheese", "Лікарські трави", "🌿", True, 3, 2, 36, 15, 10),
+    "bread": Good("bread", "Хутро", "🐺", True, 3, 2, 36, 15, 10),
+    "chicken": Good("chicken", "Ремісничі вироби", "⚒️", True, 4, 2, 24, 10, 5),
+    "pepper": Good("pepper", "Ельфійська зброя", "🗡️", False, 6, 4, 22),
+    "mead": Good("mead", "Заборонений гримуар", "📕", False, 7, 4, 21),
+    "silk": Good("silk", "Проклята реліквія", "💀", False, 8, 4, 12),
+    "crossbow": Good("crossbow", "Мутаген", "🧬", False, 15, 6, 5),
 }
 
 LEGAL_GOODS = tuple(key for key, good in GOODS.items() if good.legal)
@@ -39,13 +39,9 @@ BAG_MIN = 1
 BAG_MAX = 5
 STARTING_COINS = 50
 MIN_PLAYERS = 3
-
-# Стандартний режим другої редакції: 3–5 гравців.
-# Для 6 гравців офіційно використовується окреме правило двох заступників,
-# тому його не можна коректно підміняти звичайним одним шерифом.
 MAX_PLAYERS = 5
 
-# У грі втрьох прибираються всі картки з позначкою 4+.
+# For three players we keep the original deck-shape balance while changing only the fiction.
 THREE_PLAYER_COUNTS: dict[str, int] = {
     "apple": 48,
     "cheese": 36,
