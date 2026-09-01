@@ -6,7 +6,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 def group_home_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎲 Створити партію", callback_data="ui:create")],
-        [InlineKeyboardButton(text="📜 Як грати", callback_data="ui:rules")],
+        [InlineKeyboardButton(text="📜 Як грати — для новачків", callback_data="ui:rules")],
     ])
 
 
@@ -19,7 +19,7 @@ def lobby_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🚀 ПОЧАТИ ГРУ", callback_data="ui:begin")],
         [
             InlineKeyboardButton(text="🔄 Оновити", callback_data="ui:table"),
-            InlineKeyboardButton(text="📜 Правила", callback_data="ui:rules"),
+            InlineKeyboardButton(text="📜 Як грати", callback_data="ui:rules"),
         ],
     ])
 
@@ -29,7 +29,7 @@ def game_table_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎮 МОЯ ПАНЕЛЬ", callback_data="ui:me")],
         [
             InlineKeyboardButton(text="🔄 Оновити стіл", callback_data="ui:table"),
-            InlineKeyboardButton(text="📜 Правила", callback_data="ui:rules"),
+            InlineKeyboardButton(text="📜 Як грати", callback_data="ui:rules"),
         ],
     ])
 
@@ -74,5 +74,5 @@ def private_hub_keyboard(
 def private_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎮 ВІДКРИТИ МОЮ ПАНЕЛЬ", callback_data="ui:home")],
-        [InlineKeyboardButton(text="📜 Короткі правила", callback_data="ui:rules")],
+        [InlineKeyboardButton(text="📜 Як грати — для новачків", callback_data="ui:rules")],
     ])
