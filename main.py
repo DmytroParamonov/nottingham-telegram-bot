@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 
 from app.config import load_settings
 from app.db import Database
-from app.handlers import common_router, deals_router, game_router, ux_router
+from app.handlers import common_router, deals_router, game_router, rules_help_router, ux_router
 from app.runtime import set_service
 from app.service import GameService
 
@@ -29,8 +29,9 @@ async def main() -> None:
     set_service(service)
 
     dp = Dispatcher()
-    # UX first: it intercepts start/lobby commands and presents the button-first
-    # interface. Legacy handlers stay enabled as a fallback for old messages.
+    # Beginner help goes first so the Rules button always opens the detailed guide.
+    # UX then handles the button-first game flow; legacy handlers remain fallbacks.
+    dp.include_router(rules_help_router)
     dp.include_router(ux_router)
     dp.include_router(common_router)
     dp.include_router(deals_router)
