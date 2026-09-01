@@ -6,6 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from ..deal_texts import payment_result_text_fantasy, render_deal_fantasy
 from ..deals import (
     accept_deal,
     adjust_gold,
@@ -13,9 +14,7 @@ from ..deals import (
     draft,
     incoming_offers,
     offer_draft,
-    payment_result_text,
     reject_deal,
-    render_deal,
     reset_draft,
     set_followup_inspection,
     set_future_promise,
@@ -59,19 +58,19 @@ async def _show_builder(event: Message | CallbackQuery) -> None:
     service = svc(event)
     try:
         if not _is_private(event):
-            raise GameError("Угоди збираються в особистому чаті з ботом.")
+            raise GameError("Таємні угоди з вартою складаються в особистому чаті з ботом.")
         game = await service.game_for_user(event.from_user.id)
         if game["phase"] != "inspection":
-            raise GameError("Угоди доступні під час етапу «Огляд».")
+            raise GameError("Домовлятися з вартою можна під час етапу огляду.")
         sheriff = await service.sheriff(game["id"])
 
         if sheriff["user_id"] == event.from_user.id:
             offers = await incoming_offers(service, event.from_user.id)
             if not offers:
                 text = (
-                    "👮 <b>Угоди шерифа</b>\n\n"
-                    "Активних формальних пропозицій немає. Торгуйся в груповому чаті — "
-                    "коли хтось зафіксує фінальні умови, вони з’являться тут."
+                    "🛡 <b>Угоди міської варти</b>\n\n"
+                    "Формальних пропозицій поки немає. Купці можуть торгуватися вголос, "
+                    "а коли хтось зафіксує умови — вони з'являться тут."
                 )
                 kb = private_menu()
                 if isinstance(event, CallbackQuery):
@@ -83,24 +82,29 @@ async def _show_builder(event: Message | CallbackQuery) -> None:
 
             if isinstance(event, CallbackQuery):
                 await event.answer()
-            header = "👮 <b>Формальні пропозиції шерифу</b>\nПрийняття одразу виконує обов’язкові умови."
+            header = (
+                "🛡 <b>Формальні пропозиції командиру варти</b>\n"
+                "Якщо приймеш угоду, бот одразу виконає її обов'язкові умови."
+            )
             if isinstance(event, CallbackQuery):
                 await event.message.answer(header)
             else:
                 await event.answer(header)
             for row in offers:
-                text = await render_deal(service, row)
-                await event.message.answer(text, reply_markup=deal_offer_keyboard(row["id"])) if isinstance(event, CallbackQuery) else await event.bot.send_message(event.chat.id, text, reply_markup=deal_offer_keyboard(row["id"]))
+                text = await render_deal_fantasy(service, row)
+                if isinstance(event, CallbackQuery):
+                    await event.message.answer(text, reply_markup=deal_offer_keyboard(row["id"]))
+                else:
+                    await event.bot.send_message(event.chat.id, text, reply_markup=deal_offer_keyboard(row["id"]))
             return
 
         row = await draft(service, event.from_user.id)
         assert row is not None
         merchants = await service.merchant_rows(game["id"])
         text = (
-            (await render_deal(service, row))
-            + "\n\n<b>Збери фінальні умови та натисни «Надіслати шерифу».</b>\n"
-            "Товари з прилавка й мішка можна обіцяти навіть якщо їх немає — це дозволений блеф. "
-            "Карти з руки використовувати не можна."
+            (await render_deal_fantasy(service, row))
+            + "\n\n<b>Збери фінальні умови та натисни «Надіслати варті».</b>\n"
+            "Товарами з лавки й вантажу можна блефувати. Карти, які лишилися в руці, як хабар не використовуються."
         )
         kb = deal_builder_keyboard(merchants, row)
         if isinstance(event, CallbackQuery):
@@ -159,11 +163,13 @@ async def deal_goods_menu(callback: CallbackQuery) -> None:
             row["target_id"] == callback.from_user.id and row["action"] == "pass"
         ):
             raise GameError(
-                "Товари з мішка тут можна обіцяти лише коли ти купуєш пропуск власного мішка."
+                "Товари з вантажу можна обіцяти лише коли ти купуєш пропуск власної повозки."
             )
         await callback.answer()
         await callback.message.answer(
-            "🏪 <b>Товари з прилавка</b>" if source == "stand" else "🎒 <b>Товари з мішка</b>\nМожна блефувати про кількість і вид.",
+            "🏪 <b>Товари з лавки</b>"
+            if source == "stand"
+            else "🛞 <b>Товари з вантажу</b>\nМожна блефувати про кількість і вид.",
             reply_markup=deal_goods_keyboard(source, row),
         )
     except GameError as exc:
@@ -197,8 +203,8 @@ async def deal_followup_menu(callback: CallbackQuery) -> None:
         merchants = await service.merchant_rows(game["id"])
         await callback.answer()
         await callback.message.answer(
-            "📌 <b>Обов’язковий додатковий огляд</b>\n"
-            "Якщо шериф прийме угоду, цей мішок буде оглянуто в цьому ж раунді незалежно від інших хабарів.",
+            "📌 <b>Обов'язковий додатковий обшук</b>\n"
+            "Якщо командир варти прийме угоду, ця повозка буде обшукана в цьому ж раунді незалежно від інших хабарів.",
             reply_markup=deal_followup_keyboard(merchants, row),
         )
     except GameError as exc:
@@ -225,10 +231,10 @@ async def deal_promise_help(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer(
         "💭 <b>Майбутня обіцянка</b>\n\n"
-        "Напиши мені окремим повідомленням:\n"
-        "<code>/promise Я не оглядатиму твій мішок, коли стану шерифом</code>\n\n"
+        "Напиши мені окремим повідомленням, наприклад:\n"
+        "<code>/promise Не обшукуватиму твою повозку, коли очолю варту</code>\n\n"
         "Щоб прибрати обіцянку: <code>/promise -</code>\n"
-        "⚠️ Такі обіцянки стосуються майбутніх раундів і правилами не є обов’язковими."
+        "⚠️ Майбутня обіцянка не є обов'язковою. У Новіграді слова часто коштують дешевше за крони."
     )
 
 
@@ -266,16 +272,16 @@ async def deal_offer(callback: CallbackQuery) -> None:
     try:
         service = svc(callback)
         row = await offer_draft(service, callback.from_user.id)
-        text = await render_deal(service, row)
+        text = await render_deal_fantasy(service, row)
         sheriff = await service.sheriff(row["game_id"])
         await callback.message.edit_text(
-            "📤 <b>Фінальну пропозицію надіслано шерифу.</b>\n\n" + text,
+            "📤 <b>Фінальну пропозицію передано командиру варти.</b>\n\n" + text,
             reply_markup=private_menu(),
         )
         await callback.bot.send_message(
             sheriff["user_id"],
-            "🔔 <b>Нова формальна угода.</b>\n"
-            "Якщо натиснеш «УГОДА — прийняти», бот одразу виконає всі обов’язкові умови.\n\n"
+            "🔔 <b>Нова формальна угода біля брами.</b>\n"
+            "Якщо натиснеш «УГОДА — прийняти», бот одразу виконає всі обов'язкові умови.\n\n"
             + text,
             reply_markup=deal_offer_keyboard(row["id"]),
         )
@@ -291,29 +297,29 @@ async def _inspection_result_text(service: GameService, game_id: int, target_id:
     settlement = outcome["settlement"]
     extras = ""
     if settlement.goods_paid:
-        extras += "\nОплата боргу товарами: " + _goods_cards_text(list(settlement.goods_paid))
+        extras += "\nБорг покрито товарами: " + _goods_cards_text(list(settlement.goods_paid))
     if settlement.forgiven:
-        extras += f"\nНесплачений залишок {settlement.forgiven} вважається погашеним."
+        extras += f"\nНесплачений залишок {settlement.forgiven} крон вважається погашеним."
     if result.truthful:
         verdict = (
-            f"😇 Декларація була чесною. Шериф сплачує штраф <b>{outcome['amount_due']}</b>."
+            f"😇 Купець не брехав. Варта платить йому <b>{outcome['amount_due']} крон</b> за даремний обшук."
         )
     else:
         verdict = (
-            "🚨 Брехню викрито. Конфісковано: "
+            "🚨 Контрабанду викрито. Конфісковано: "
             + _goods_cards_text(list(result.confiscated))
-            + f". Штраф: <b>{outcome['amount_due']}</b>."
+            + f". Штраф: <b>{outcome['amount_due']} крон</b>."
         )
-    return f"🔍 <b>Огляд мішка {merchant['full_name']}</b>\n{contents}\n\n{verdict}{extras}"
+    return f"🔍 <b>Обшук повозки · {merchant['full_name']}</b>\n{contents}\n\n{verdict}{extras}"
 
 
 async def _pass_result_text(service: GameService, game_id: int, target_id: int, outcome: dict) -> str:
     merchant = await service.player(game_id, target_id)
     legal = _goods_cards_text(outcome["legal_cards"])
     return (
-        f"✅ <b>{merchant['full_name']} проходить без огляду.</b>\n"
+        f"✅ <b>{merchant['full_name']} проходить крізь браму без обшуку.</b>\n"
         f"Дозволені товари: {legal}.\n"
-        f"Контрабанда: <b>{outcome['contraband_count']}</b> карт(ок) долілиць."
+        f"Контрабанда: <b>{outcome['contraband_count']}</b> карт(ок). Її вид лишається таємним."
     )
 
 
@@ -329,13 +335,13 @@ async def _announce_advance(bot, service: GameService, game_id: int, advanced: d
     await bot.send_message(
         game["chat_id"],
         f"🔄 <b>Раунд {game['round_no']}</b>\n"
-        f"Новий шериф: <b>{sheriff['full_name']}</b>.\n"
-        "🛒 Починається «Торгівля». Новий шериф відкриває /market і обирає першого торговця.",
+        f"Новий командир варти: <b>{sheriff['full_name']}</b>.\n"
+        "🛒 Починається торг на ринку. Новий командир відкриває /market і обирає першого купця."
     )
     try:
         await bot.send_message(
             sheriff["user_id"],
-            "👮 Ти шериф. Відкрий /market і обери, хто торгує першим.",
+            "🛡 Ти командир варти. Відкрий /market і обери, хто торгує першим.",
             reply_markup=private_menu(),
         )
     except Exception:
@@ -349,11 +355,11 @@ async def deal_reject(callback: CallbackQuery) -> None:
         service = svc(callback)
         row = await reject_deal(service, callback.from_user.id, deal_id)
         proposer = await service.player(row["game_id"], row["proposer_id"])
-        await callback.message.edit_text("❌ <b>Угоду відхилено.</b>")
+        await callback.message.edit_text("❌ <b>Варта відхилила угоду.</b>")
         try:
             await callback.bot.send_message(
                 proposer["user_id"],
-                f"❌ Шериф відхилив твою угоду #{deal_id}. Можеш зібрати нову через /deal.",
+                f"❌ Командир варти відхилив твою угоду #{deal_id}. Можеш зібрати нову через /deal.",
                 reply_markup=private_menu(),
             )
         except Exception:
@@ -371,18 +377,21 @@ async def deal_accept(callback: CallbackQuery) -> None:
         before = await service.db.fetchone("SELECT * FROM deals WHERE id=?", (deal_id,))
         if not before:
             raise GameError("Угоду не знайдено.")
-        terms = await render_deal(service, before)
+        terms = await render_deal_fantasy(service, before)
         outcome = await accept_deal(service, callback.from_user.id, deal_id)
         row = outcome["deal"]
         game_id = row["game_id"]
         game = await service.game(game_id)
 
         await callback.message.edit_text(
-            "🤝 <b>УГОДУ ПРИЙНЯТО.</b> Усі обов’язкові умови виконано ботом."
+            "🤝 <b>УГОДУ ПРИЙНЯТО.</b> Варта дотримується зафіксованих умов."
         )
         await callback.bot.send_message(
             game["chat_id"],
-            "🤝 <b>УГОДА!</b>\n\n" + terms + "\n\n" + payment_result_text(outcome),
+            "🤝 <b>УГОДА БІЛЯ БРАМИ!</b>\n\n"
+            + terms
+            + "\n\n"
+            + payment_result_text_fantasy(outcome),
         )
 
         if row["action"] == "pass":
@@ -399,7 +408,7 @@ async def deal_accept(callback: CallbackQuery) -> None:
         if outcome["followup"] is not None:
             await callback.bot.send_message(
                 game["chat_id"],
-                "📌 <b>Обов’язкова додаткова умова угоди:</b>\n"
+                "📌 <b>Додаткова умова угоди:</b>\n"
                 + await _inspection_result_text(
                     service,
                     game_id,
@@ -412,7 +421,8 @@ async def deal_accept(callback: CallbackQuery) -> None:
         try:
             await callback.bot.send_message(
                 proposer["user_id"],
-                f"🤝 Шериф прийняв угоду #{deal_id}.\n" + payment_result_text(outcome),
+                f"🤝 Командир варти прийняв угоду #{deal_id}.\n"
+                + payment_result_text_fantasy(outcome),
                 reply_markup=private_menu(),
             )
         except Exception:
