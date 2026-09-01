@@ -1,3 +1,5 @@
+from app.handlers.rules_help import split_telegram_text
+from app.tutorials import beginner_rules_text
 from app.ui import render_game_table, render_lobby_table, render_private_hub
 from app.ui_keyboards import game_table_keyboard, lobby_keyboard, private_hub_keyboard
 
@@ -81,9 +83,18 @@ def test_group_game_table_hides_contraband_identity():
     ]
     text = render_game_table(game, players, sheriff)
     assert "контрабанда ×2" in text
-    assert "Перець" not in text
-    assert "Шовк" not in text
+    assert "Ельфійська зброя" not in text
+    assert "Проклята реліквія" not in text
 
     callbacks = [button.callback_data for row in game_table_keyboard().inline_keyboard for button in row]
     assert "ui:me" in callbacks
     assert "ui:table" in callbacks
+
+
+def test_beginner_rules_are_split_below_telegram_limit():
+    rules = beginner_rules_text()
+    chunks = split_telegram_text(rules)
+    assert len(chunks) >= 2
+    assert "Мутаген" in rules
+    assert all(len(chunk) <= 3500 for chunk in chunks)
+    assert "".join(chunk.replace("\n\n", "") for chunk in chunks)
