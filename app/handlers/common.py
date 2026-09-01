@@ -52,14 +52,14 @@ async def start(message: Message) -> None:
     )
     if message.chat.type != "private":
         await message.answer(
-            "Я працюю з таємними картками в особистих повідомленнях. "
+            "Таємні товари й угоди приходять в особисті повідомлення. "
             "Відкрий мене в ЛС і натисни /start."
         )
         return
     await message.answer(
-        "🏰 <b>Шериф Ноттінгема</b>\n\n"
-        "У групі створи партію командою /newgame, інші гравці приєднуються через /join. "
-        "Рука, мішок і особисті пропозиції будуть тут, у приватному чаті.",
+        "🐺 <b>Брама Новіграда</b>\n\n"
+        "У групі збери купців через /newgame, інші приєднаються через /join. "
+        "Товари, вантаж і приватні пропозиції варті будуть тут.",
         reply_markup=private_menu(),
     )
 
@@ -88,15 +88,15 @@ async def market(event: Message | CallbackQuery) -> None:
     try:
         game = await service.game_for_user(event.from_user.id)
         if game["phase"] != "market":
-            raise GameError("Зараз не етап «Торгівля».")
+            raise GameError("Зараз не етап «Торг на ринку».")
         sheriff = await service.sheriff(game["id"])
 
         if sheriff["user_id"] == event.from_user.id:
             if game.get("market_start_seat") is None:
                 merchants = await service.merchant_rows(game["id"])
                 text = (
-                    "👮 <b>Торгівля: вибір першого гравця</b>\n\n"
-                    "За правилами шериф обирає, хто торгує першим. "
+                    "🛡 <b>Торг на ринку: вибір першого купця</b>\n\n"
+                    "Командир варти обирає, хто торгує першим. "
                     "Після нього хід піде за годинниковою стрілкою."
                 )
                 kb = market_first_keyboard(merchants)
@@ -104,22 +104,22 @@ async def market(event: Message | CallbackQuery) -> None:
                 current = await current_market_trader(service, game["id"])
                 if current:
                     text = (
-                        "👮 <b>Торгівля триває.</b>\n"
+                        "🛡 <b>Ринок шумить.</b>\n"
                         f"Зараз торгує: <b>{current['full_name']}</b>.\n"
-                        "Спостерігай, які картки він відкрито скидає."
+                        "Спостерігай, які товари він відкрито скидає."
                     )
                 else:
-                    text = "👮 Торгівлю цього раунду вже завершено."
+                    text = "🛡 Торг цього раунду вже завершено."
                 kb = private_menu()
         else:
             p = await ensure_market_turn(service, event.from_user.id)
             hand_cards = loads(p["hand_json"])
             selected = loads(p["bag_json"])
             text = (
-                "🛒 <b>Торгівля — твій хід</b>\n"
+                "🛒 <b>Торг на ринку — твій хід</b>\n"
                 f"Обрано для скидання: <b>{len(selected)}/5</b>\n\n"
-                "Можна скинути від 0 до 5 карток і добрати до шести. "
-                "Скинуті товари будуть відкрито показані всім гравцям."
+                "Можеш скинути 0–5 товарів і добрати руку до шести. "
+                "Скинуті товари всі побачать — варта теж дивиться."
             )
             kb = market_keyboard(hand_cards, selected)
     except GameError as exc:
@@ -145,13 +145,13 @@ async def market_first(callback: CallbackQuery) -> None:
         )
         await callback.bot.send_message(
             game["chat_id"],
-            f"🛒 Шериф обрав першого торговця: <b>{merchant['full_name']}</b>. "
+            f"🛒 Командир варти обрав першого купця: <b>{merchant['full_name']}</b>. "
             "Після нього торгуємо за годинниковою стрілкою.",
         )
         try:
             await callback.bot.send_message(
                 merchant["user_id"],
-                "🛒 <b>Твій хід у Торгівлі.</b> Відкрий /market, скинь 0–5 карток і підтвердь хід.",
+                "🛒 <b>Твій хід на ринку.</b> Відкрий /market, скинь 0–5 товарів і підтвердь хід.",
                 reply_markup=private_menu(),
             )
         except Exception:
@@ -171,7 +171,7 @@ async def market_toggle(callback: CallbackQuery) -> None:
         hand_cards = loads(p["hand_json"])
         selected = loads(p["bag_json"])
         await callback.message.edit_text(
-            "🛒 <b>Торгівля — твій хід</b>\n"
+            "🛒 <b>Торг на ринку — твій хід</b>\n"
             f"Обрано для скидання: <b>{len(selected)}/5</b>",
             reply_markup=market_keyboard(hand_cards, selected),
         )
@@ -187,7 +187,7 @@ async def market_clear(callback: CallbackQuery) -> None:
         await ensure_market_turn(service, callback.from_user.id)
         p = await service.clear_market_selection(callback.from_user.id)
         await callback.message.edit_text(
-            "🛒 <b>Торгівля — твій хід</b>\nОбрано для скидання: <b>0/5</b>",
+            "🛒 <b>Торг на ринку — твій хід</b>\nОбрано для скидання: <b>0/5</b>",
             reply_markup=market_keyboard(loads(p["hand_json"]), []),
         )
         await callback.answer()
@@ -206,27 +206,27 @@ async def market_confirm(callback: CallbackQuery) -> None:
         _, all_ready = await service.confirm_market(callback.from_user.id)
 
         await callback.message.edit_text(
-            f"✅ <b>Твій хід Торгівлі завершено.</b> Скинуто карток: {len(discarded)}.",
+            f"✅ <b>Торг завершено.</b> Скинуто товарів: {len(discarded)}.",
             reply_markup=private_menu(),
         )
         if discarded:
             await callback.bot.send_message(
                 game["chat_id"],
-                f"🛒 <b>{callback.from_user.full_name}</b> скидає: {goods_list(discarded)}.",
+                f"🛒 <b>{callback.from_user.full_name}</b> скидає на ринку: {goods_list(discarded)}.",
             )
         else:
             await callback.bot.send_message(
                 game["chat_id"],
-                f"🛒 <b>{callback.from_user.full_name}</b> не скидає жодної картки.",
+                f"🛒 <b>{callback.from_user.full_name}</b> нічого не скидає.",
             )
 
         if all_ready:
             await callback.bot.send_message(
                 game["chat_id"],
-                "🎒 <b>Крок 2 — Завантаження товарів.</b>\n"
-                "Усі торговці таємно кладуть у мішок від 1 до 5 карток. "
-                "Після запечатування змінити вміст уже не можна.\n\n"
-                "Відкрийте /bag у приватному чаті з ботом.",
+                "🛞 <b>Крок 2 — Завантаження возів.</b>\n"
+                "Усі купці таємно кладуть у вантаж від 1 до 5 товарів. "
+                "Після запечатування змінити його вже не можна.\n\n"
+                "Відкрийте /bag у приватному чаті з ботом."
             )
         else:
             next_trader = await current_market_trader(service, game["id"])
@@ -238,7 +238,7 @@ async def market_confirm(callback: CallbackQuery) -> None:
                 try:
                     await callback.bot.send_message(
                         next_trader["user_id"],
-                        "🛒 <b>Тепер твій хід у Торгівлі.</b> Відкрий /market.",
+                        "🛒 <b>Тепер твій хід на ринку.</b> Відкрий /market.",
                         reply_markup=private_menu(),
                     )
                 except Exception:
@@ -256,23 +256,23 @@ async def bag(event: Message | CallbackQuery) -> None:
         game = await service.game_for_user(event.from_user.id)
         if game["phase"] != "packing":
             if game["phase"] == "market":
-                raise GameError("Спочатку потрібно завершити етап «Торгівля».")
+                raise GameError("Спочатку заверши торг на ринку.")
             if game["phase"] in {"declaration", "inspection"}:
-                raise GameError("Мішки цього раунду вже запечатано.")
-            raise GameError("Зараз мішок збирати не можна.")
+                raise GameError("Вантажі цього раунду вже запечатано.")
+            raise GameError("Зараз вантаж готувати не можна.")
         p = await service.player(game["id"], event.from_user.id)
         sheriff = await service.sheriff(game["id"])
         if sheriff["user_id"] == event.from_user.id:
-            raise GameError("У цьому раунді ти шериф 👮")
+            raise GameError("У цьому раунді ти командир варти 🛡")
         if p["bag_locked"]:
-            raise GameError(f"Мішок уже запечатано: {len(loads(p['bag_json']))} товарів.")
+            raise GameError(f"Вантаж уже запечатано: {len(loads(p['bag_json']))} товарів.")
         hand_cards = loads(p["hand_json"])
         bag_cards = loads(p["bag_json"])
         text = (
-            "🎒 <b>Завантаження товарів</b>\n"
+            "🛞 <b>Завантаження повозки</b>\n"
             f"Обрано: <b>{len(bag_cards)}/5</b>\n\n"
-            "Додай від 1 до 5 карток. Після натискання «Запечатати» "
-            "повернути чи замінити товари вже не можна."
+            "Додай від 1 до 5 товарів. Можеш змішати дозволене й контрабанду. "
+            "Після «Запечатати вантаж» повернути чи замінити товар уже не можна."
         )
         kb = bag_keyboard(hand_cards, bag_cards)
     except GameError as exc:
@@ -293,9 +293,9 @@ async def toggle_bag(callback: CallbackQuery) -> None:
         hand_cards = loads(p["hand_json"])
         bag_cards = loads(p["bag_json"])
         await callback.message.edit_text(
-            "🎒 <b>Завантаження товарів</b>\n"
+            "🛞 <b>Завантаження повозки</b>\n"
             f"Обрано: <b>{len(bag_cards)}/5</b>\n\n"
-            f"У мішку зараз: {service.bag_summary(bag_cards)}",
+            f"У вантажі зараз: {service.bag_summary(bag_cards)}",
             reply_markup=bag_keyboard(hand_cards, bag_cards),
         )
         await callback.answer()
@@ -309,7 +309,7 @@ async def clear_bag(callback: CallbackQuery) -> None:
     try:
         p = await service.clear_bag(callback.from_user.id)
         await callback.message.edit_text(
-            "🎒 <b>Мішок очищено</b>\nОбрано: <b>0/5</b>",
+            "🛞 <b>Вантаж очищено</b>\nОбрано: <b>0/5</b>",
             reply_markup=bag_keyboard(loads(p["hand_json"]), []),
         )
         await callback.answer()
@@ -324,25 +324,24 @@ async def lock_bag(callback: CallbackQuery) -> None:
         p, all_locked, first_declarer = await service.lock_bag(callback.from_user.id)
         bag_cards = loads(p["bag_json"])
         await callback.message.edit_text(
-            "🔒 <b>Мішок запечатано.</b>\n\n"
-            f"У ньому <b>{len(bag_cards)}</b> товарів. Вміст більше змінити не можна.\n"
-            "Чекаємо, поки решта торговців також запечатають мішки.",
-            reply_markup=private_menu(),
-        )
+            "🔒 <b>Вантаж запечатано.</b>\n\n"
+            f"У повозці <b>{len(bag_cards)}</b> товарів. Вміст більше змінити не можна.\n"
+            "Чекаємо, поки решта купців також запечатають вантаж."
+        , reply_markup=private_menu())
 
         if all_locked and first_declarer:
             game = await service.game_for_user(callback.from_user.id)
             await callback.bot.send_message(
                 game["chat_id"],
-                "📜 <b>Крок 3 — Декларування.</b>\n"
+                "📜 <b>Крок 3 — Декларація біля брами.</b>\n"
                 f"Починає <b>{first_declarer['full_name']}</b>, далі — за годинниковою стрілкою.\n"
-                "Кількість карток у мішку називається точно, а вид можна назвати лише один — дозволений товар.",
+                "Кількість товарів називається точно. Вид заявляється лише один і лише дозволений."
             )
             try:
                 await callback.bot.send_message(
                     first_declarer["user_id"],
-                    "📜 <b>Твоя черга декларувати.</b>\n"
-                    "Обери один вид дозволеного товару. Кількість карток бот зафіксує автоматично.",
+                    "📜 <b>Твоя черга говорити з вартою.</b>\n"
+                    "Обери один дозволений товар. Кількість вантажу бот зафіксує автоматично.",
                     reply_markup=declaration_keyboard(),
                 )
             except Exception:
@@ -364,21 +363,21 @@ async def declare(callback: CallbackQuery) -> None:
         declaration_text = f"{bag_size} × {good.emoji} {good.name}"
 
         await callback.message.edit_text(
-            "📜 <b>Декларацію зафіксовано.</b>\n"
+            "📜 <b>Слова перед вартою зафіксовано.</b>\n"
             f"Ти заявив: <b>{declaration_text}</b>.\n\n"
-            "Змінити цю декларацію вже не можна. Під час переговорів можеш блефувати скільки завгодно 😏",
+            "Змінити декларацію вже не можна. А от переконувати варту, торгуватися й блефувати — можна 😏",
             reply_markup=private_menu(),
         )
         await callback.bot.send_message(
             game["chat_id"],
-            f"📜 <b>{callback.from_user.full_name}</b> декларує: <b>{declaration_text}</b>.",
+            f"📜 <b>{callback.from_user.full_name}</b> заявляє варті: <b>{declaration_text}</b>.",
         )
 
         if next_declarer:
             try:
                 await callback.bot.send_message(
                     next_declarer["user_id"],
-                    "📜 <b>Тепер твоя черга декларувати.</b>",
+                    "📜 <b>Тепер твоя черга говорити з вартою.</b>",
                     reply_markup=declaration_keyboard(),
                 )
             except Exception:
@@ -388,15 +387,15 @@ async def declare(callback: CallbackQuery) -> None:
             try:
                 await callback.bot.send_message(
                     sheriff["user_id"],
-                    "👮 <b>Усі торговці біля воріт.</b> Починається огляд.\n"
-                    "Можеш вести переговори, приймати або ігнорувати хабарі й вирішувати долю кожного мішка через /inspect.",
+                    "🛡 <b>Усі купці біля брами.</b> Починається огляд.\n"
+                    "Можеш домовлятися, приймати або ігнорувати хабарі й вирішувати долю кожної повозки через /inspect."
                 )
             except Exception:
                 pass
             await callback.bot.send_message(
                 game["chat_id"],
-                "🔔 <b>Крок 4 — Огляд.</b>\n"
-                "Усі декларації зафіксовано. Тепер можна торгуватися, погрожувати, блефувати й пропонувати хабарі 😏",
+                "🔔 <b>Крок 4 — Огляд вартою.</b>\n"
+                "Усі декларації зафіксовано. Тепер можна торгуватися, погрожувати, блефувати й пропонувати хабарі 😏"
             )
         await callback.answer()
     except GameError as exc:
@@ -411,21 +410,21 @@ async def bribe_command(message: Message) -> None:
         try:
             offer = await service.set_bribe(message.from_user.id, int(args[1]))
             await message.answer(
-                f"💰 Запропоновано шерифу: <b>{offer['coins']}</b> золотих.",
+                f"🪙 Запропоновано командиру варти: <b>{offer['coins']}</b> крон.",
                 reply_markup=private_menu(),
             )
         except GameError as exc:
             await message.answer(f"⚠️ {exc}")
         return
-    await message.answer("💰 Обери розмір грошового хабара:", reply_markup=bribe_keyboard(0))
+    await message.answer("🪙 Обери розмір хабара в кронах:", reply_markup=bribe_keyboard(0))
 
 
 @router.callback_query(F.data == "menu:bribe")
 async def bribe_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer(
-        "💰 Обери розмір грошового хабара.\n"
-        "Поки що бот автоматизує золото; товарами й майбутніми послугами можна домовлятися в загальному чаті.",
+        "🪙 Обери розмір грошового хабара.\n"
+        "Крони бот перерахує автоматично. Для товарів, умов і складних домовленостей відкрий «Угоди з вартою».",
         reply_markup=bribe_keyboard(0),
     )
 
@@ -444,14 +443,14 @@ async def bribe_confirm(callback: CallbackQuery) -> None:
     try:
         offer = await service.set_bribe(callback.from_user.id, amount)
         await callback.message.edit_text(
-            f"💰 <b>Хабар запропоновано:</b> {amount} золотих.\n"
-            "Золото спишеться лише якщо шериф явно прийме цей хабар і пропустить мішок.",
+            f"🪙 <b>Хабар запропоновано:</b> {amount} крон.\n"
+            "Крони спишуться лише якщо командир варти явно прийме хабар і пропустить твою повозку.",
             reply_markup=private_menu(),
         )
         try:
             await callback.bot.send_message(
                 offer["sheriff"]["user_id"],
-                f"💰 {callback.from_user.full_name} пропонує <b>{amount}</b> золотих за пропуск мішка.",
+                f"🪙 {callback.from_user.full_name} пропонує <b>{amount}</b> крон за пропуск повозки.",
             )
         except Exception:
             pass
